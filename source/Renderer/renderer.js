@@ -28,7 +28,7 @@ import fullscreenVertShader from "./shaders/fullscreen.vert";
 import tonemapMainFragShader from "./shaders/tonemap_main.frag";
 import splatCompositeFragShader from "./shaders/splat_composite.frag";
 import { gltfLight } from "../gltf/light.js";
-import { isMsfsHiddenPrimitive } from "../gltf/msfs.js";
+import { isMsfsHiddenPrimitive, getMsfsDepthBias, sortByMsfsDrawOrder } from "../gltf/msfs.js";
 import { jsToGl } from "../gltf/utils.js";
 import { gltfMaterial } from "../gltf/material.js";
 
@@ -991,9 +991,9 @@ class gltfRenderer {
                 );
             }
 
-            this.transparentDrawables = currentCamera.sortPrimitivesByDepth(
+            this.transparentDrawables = sortByMsfsDrawOrder(
                 state.gltf,
-                this.transparentDrawables
+                currentCamera.sortPrimitivesByDepth(state.gltf, this.transparentDrawables)
             );
             for (const drawable of this.transparentDrawables) {
                 let renderpassConfiguration = {};
@@ -1175,9 +1175,9 @@ class gltfRenderer {
             );
         }
 
-        this.transparentDrawables = currentCamera.sortPrimitivesByDepth(
+        this.transparentDrawables = sortByMsfsDrawOrder(
             state.gltf,
-            this.transparentDrawables
+            currentCamera.sortPrimitivesByDepth(state.gltf, this.transparentDrawables)
         );
         this.needsRedraw = false;
 
@@ -2002,6 +2002,14 @@ class gltfRenderer {
 	        }
 	    }
 	    
+        // MSFS geometry decals need a depth bias to win against the surface they lie on.
+        const depthBias = getMsfsDepthBias(material);
+        if (depthBias !== 0)
+        {
+            this.webGl.context.enable(GL.POLYGON_OFFSET_FILL);
+            this.webGl.context.polygonOffset(depthBias, depthBias);
+        }
+
         if (drawIndexed)
         {
             const indexAccessor = state.gltf.accessors[primitive.indices];
@@ -2018,6 +2026,11 @@ class gltfRenderer {
             } else {
                 this.webGl.context.drawArrays(primitive.mode, 0, vertexCount);
             }
+        }
+
+        if (depthBias !== 0)
+        {
+            this.webGl.context.disable(GL.POLYGON_OFFSET_FILL);
         }
 
         for (const attribute of primitive.glAttributes)
