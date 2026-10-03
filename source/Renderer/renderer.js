@@ -28,6 +28,7 @@ import fullscreenVertShader from "./shaders/fullscreen.vert";
 import tonemapMainFragShader from "./shaders/tonemap_main.frag";
 import splatCompositeFragShader from "./shaders/splat_composite.frag";
 import { gltfLight } from "../gltf/light.js";
+import { isMsfsHiddenPrimitive } from "../gltf/msfs.js";
 import { jsToGl } from "../gltf/utils.js";
 import { gltfMaterial } from "../gltf/material.js";
 
@@ -611,6 +612,7 @@ class gltfRenderer {
     }
 
     prepareScene(state, scene) {
+        const params = state.renderingParameters;
         const newNodes = scene.gatherNodes(state.gltf, state.renderingParameters.enabledExtensions);
         this.selectionDrawables = newNodes.selectableNodes
             .filter((node) => node.mesh !== undefined)
@@ -622,7 +624,8 @@ class gltfRenderer {
                         })
                     ),
                 []
-            );
+            )
+            .filter(({ primitive }) => !isMsfsHiddenPrimitive(state.gltf, primitive, params));
         this.hoverDrawables = newNodes.hoverableNodes
             .filter((node) => node.mesh !== undefined)
             .reduce(
@@ -633,16 +636,19 @@ class gltfRenderer {
                         })
                     ),
                 []
-            );
+            )
+            .filter(({ primitive }) => !isMsfsHiddenPrimitive(state.gltf, primitive, params));
 
         // check if nodes have changed since previous frame to avoid unnecessary updates
         if (
             newNodes.nodes.length === this.nodes?.length &&
-            newNodes.nodes.every((element, i) => element === this.nodes[i])
+            newNodes.nodes.every((element, i) => element === this.nodes[i]) &&
+            params.showMsfsInvisibleMaterials === this.showMsfsInvisibleMaterials
         ) {
             return;
         }
         this.nodes = newNodes.nodes;
+        this.showMsfsInvisibleMaterials = params.showMsfsInvisibleMaterials;
 
         // collect drawables by essentially zipping primitives (for geometry and material)
         // and nodes for the transform
@@ -657,7 +663,11 @@ class gltfRenderer {
                     ),
                 []
             )
-            .filter(({ primitive }) => primitive.material !== undefined);
+            .filter(
+                ({ primitive }) =>
+                    primitive.material !== undefined &&
+                    !isMsfsHiddenPrimitive(state.gltf, primitive, params)
+            );
         this.drawables = drawables;
 
         // opaque drawables don't need sorting

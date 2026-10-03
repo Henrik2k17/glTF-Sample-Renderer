@@ -140,7 +140,9 @@ class GltfState {
             /** MSAA used for cases which are not handled by the browser (e.g. Transmission)*/
             internalMSAA: 4,
             /** Use RGBA16F floating-point main framebuffer instead of RGBA8 */
-            floatingPointFramebuffer: true
+            floatingPointFramebuffer: true,
+            /** Render MSFS helper geometry (ASOBO_material_invisible), e.g. collision shells */
+            showMsfsInvisibleMaterials: false
         };
 
         // retain a reference to the view with which the state was created, so that it can be validated

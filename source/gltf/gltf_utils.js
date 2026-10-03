@@ -2,8 +2,18 @@ import { vec3 } from "gl-matrix";
 import { jsToGl } from "./utils.js";
 import { gltfAccessor } from "./accessor.js";
 import { GltfObject } from "./gltf_object.js";
+import { isMsfsInvisibleMaterial } from "./msfs.js";
 
 function getSceneExtents(gltf, sceneIndex, outMin, outMax) {
+    // MSFS helper geometry (e.g. a 150 m LOD bounding box) would dominate the framing.
+    // Fall back to all geometry if the scene contains nothing else.
+    computeSceneExtents(gltf, sceneIndex, outMin, outMax, true);
+    if (outMin[0] === Number.POSITIVE_INFINITY) {
+        computeSceneExtents(gltf, sceneIndex, outMin, outMax, false);
+    }
+}
+
+function computeSceneExtents(gltf, sceneIndex, outMin, outMax, skipMsfsInvisible) {
     for (const i of [0, 1, 2]) {
         outMin[i] = Number.POSITIVE_INFINITY;
         outMax[i] = Number.NEGATIVE_INFINITY;
@@ -26,6 +36,9 @@ function getSceneExtents(gltf, sceneIndex, outMin, outMax) {
         }
 
         for (const primitive of mesh.primitives) {
+            if (skipMsfsInvisible && isMsfsInvisibleMaterial(gltf.materials[primitive.material])) {
+                continue;
+            }
             const attribute = primitive.glAttributes.find((a) => a.attribute == "POSITION");
             if (attribute === undefined) {
                 continue;
