@@ -66,7 +66,119 @@ function sortByMsfsDrawOrder(gltf, drawables) {
     );
 }
 
+function withTiling(textureInfo, tiling) {
+    if (tiling === undefined || tiling === 1) {
+        return textureInfo;
+    }
+    return {
+        ...textureInfo,
+        extensions: {
+            ...textureInfo.extensions,
+            KHR_texture_transform: { scale: [tiling, tiling] }
+        }
+    };
+}
+
+/**
+ * Translates MSFS material extensions into the KHR equivalents the renderer already supports.
+ * Works on the material JSON before it is parsed and returns the shader defines needed for the
+ * parts that have no KHR equivalent.
+ * - ASOBO_material_clear_coat_v2 -> KHR_materials_clearcoat. With "uniform base roughness"
+ *   (clearcoatInverseRoughness) the coat takes its roughness from the base comp texture and the
+ *   layer below gets clearcoatBaseRoughness. Otherwise the coat roughness is the alpha channel of
+ *   clearcoatColorRoughnessTexture. The coat colour (RGB) is not supported.
+ * - ASOBO_material_emissive -> KHR_materials_emissive_strength, so the day/night multipliers can
+ *   be applied as emissive strength (see getMsfsEmissiveMultiplier).
+ * - ASOBO_material_alphamode_dither -> BLEND, approximating dithered transparency.
+ * @param {object} json - The material JSON.
+ * @returns {{json: object, defines: string[]}}
+ */
+function translateMsfsMaterialJson(json) {
+    const ext = json.extensions;
+    if (ext === undefined) {
+        return { json, defines: [] };
+    }
+    const out = { ...json, extensions: { ...ext } };
+    const defines = [];
+
+    const clearcoat = ext.ASOBO_material_clear_coat_v2;
+    if (clearcoat !== undefined && ext.KHR_materials_clearcoat === undefined) {
+        const pbr = { ...json.pbrMetallicRoughness };
+        out.pbrMetallicRoughness = pbr;
+        const khr = {
+            clearcoatFactor: 1,
+            clearcoatRoughnessFactor: clearcoat.clearcoatRoughnessFactor ?? 1
+        };
+        if (clearcoat.clearcoatInverseRoughness) {
+            if (pbr.metallicRoughnessTexture !== undefined) {
+                khr.clearcoatRoughnessTexture = { ...pbr.metallicRoughnessTexture };
+            } else {
+                khr.clearcoatRoughnessFactor *= pbr.roughnessFactor ?? 1;
+            }
+            pbr.roughnessFactor = clearcoat.clearcoatBaseRoughness ?? 0.5;
+            defines.push("MSFS_UNIFORM_BASE_ROUGHNESS 1");
+        } else if (clearcoat.clearcoatColorRoughnessTexture !== undefined) {
+            khr.clearcoatRoughnessTexture = withTiling(
+                clearcoat.clearcoatColorRoughnessTexture,
+                clearcoat.clearcoatColorRoughnessTiling
+            );
+            defines.push("MSFS_CLEARCOAT_ROUGHNESS_ALPHA 1");
+        }
+        if (clearcoat.clearcoatNormalTexture !== undefined) {
+            khr.clearcoatNormalTexture = withTiling(
+                {
+                    ...clearcoat.clearcoatNormalTexture,
+                    scale:
+                        (clearcoat.clearcoatNormalTexture.scale ?? 1) *
+                        (clearcoat.clearcoatNormalFactor ?? 1)
+                },
+                clearcoat.clearcoatNormalTiling
+            );
+        } else if (clearcoat.clearcoatBaseAffectCoat !== false && json.normalTexture) {
+            khr.clearcoatNormalTexture = { ...json.normalTexture };
+        }
+        out.extensions.KHR_materials_clearcoat = khr;
+    }
+
+    const emissive = ext.ASOBO_material_emissive;
+    if (
+        emissive !== undefined &&
+        ext.KHR_materials_emissive_strength === undefined &&
+        ((emissive.emissiveDayMultiplier ?? 1) !== 1 ||
+            (emissive.emissiveNightMultiplier ?? 1) !== 1)
+    ) {
+        out.extensions.KHR_materials_emissive_strength = { emissiveStrength: 1 };
+    }
+
+    if (
+        ext.ASOBO_material_alphamode_dither !== undefined &&
+        (json.alphaMode ?? "OPAQUE") === "OPAQUE"
+    ) {
+        out.alphaMode = "BLEND";
+    }
+
+    return { json: out, defines };
+}
+
+/**
+ * Returns the ASOBO_material_emissive multiplier for the current time of day.
+ * @param {object} material - A gltfMaterial.
+ * @param {object} renderingParameters - GltfState.renderingParameters.
+ * @returns {number}
+ */
+function getMsfsEmissiveMultiplier(material, renderingParameters) {
+    const emissive = material?.extensions?.ASOBO_material_emissive;
+    if (emissive === undefined) {
+        return 1;
+    }
+    return renderingParameters.msfsNightLighting
+        ? (emissive.emissiveNightMultiplier ?? 1)
+        : (emissive.emissiveDayMultiplier ?? 1);
+}
+
 export {
+    translateMsfsMaterialJson,
+    getMsfsEmissiveMultiplier,
     isMsfsInvisibleMaterial,
     isMsfsHiddenPrimitive,
     getMsfsDrawOrder,

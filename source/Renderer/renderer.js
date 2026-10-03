@@ -28,7 +28,12 @@ import fullscreenVertShader from "./shaders/fullscreen.vert";
 import tonemapMainFragShader from "./shaders/tonemap_main.frag";
 import splatCompositeFragShader from "./shaders/splat_composite.frag";
 import { gltfLight } from "../gltf/light.js";
-import { isMsfsHiddenPrimitive, getMsfsDepthBias, sortByMsfsDrawOrder } from "../gltf/msfs.js";
+import {
+    isMsfsHiddenPrimitive,
+    getMsfsDepthBias,
+    sortByMsfsDrawOrder,
+    getMsfsEmissiveMultiplier
+} from "../gltf/msfs.js";
 import { jsToGl } from "../gltf/utils.js";
 import { gltfMaterial } from "../gltf/material.js";
 
@@ -1881,7 +1886,11 @@ class gltfRenderer {
 
         this.shader.updateUniform("u_Dispersion", material.extensions?.KHR_materials_dispersion?.dispersion);
 
-        this.shader.updateUniform("u_EmissiveStrength", material.extensions?.KHR_materials_emissive_strength?.emissiveStrength);
+        const emissiveStrength = material.extensions?.KHR_materials_emissive_strength?.emissiveStrength;
+        this.shader.updateUniform(
+            "u_EmissiveStrength",
+            emissiveStrength === undefined ? undefined : emissiveStrength * getMsfsEmissiveMultiplier(material, state.renderingParameters)
+        );
 
         this.shader.updateUniform("u_Ior", material.extensions?.KHR_materials_ior?.ior);
 

@@ -142,7 +142,9 @@ class GltfState {
             /** Use RGBA16F floating-point main framebuffer instead of RGBA8 */
             floatingPointFramebuffer: true,
             /** Render MSFS helper geometry (ASOBO_material_invisible), e.g. collision shells */
-            showMsfsInvisibleMaterials: false
+            showMsfsInvisibleMaterials: false,
+            /** Use the MSFS night emissive multipliers (ASOBO_material_emissive) instead of the day ones */
+            msfsNightLighting: false
         };
 
         // retain a reference to the view with which the state was created, so that it can be validated

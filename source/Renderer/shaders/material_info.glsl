@@ -236,7 +236,10 @@ MaterialInfo getMetallicRoughnessInfo(MaterialInfo info)
     // Roughness is stored in the 'g' channel, metallic is stored in the 'b' channel.
     // This layout intentionally reserves the 'r' channel for (optional) occlusion map data
     vec4 mrSample = texture(u_MetallicRoughnessSampler, getMetallicRoughnessUV());
+#ifndef MSFS_UNIFORM_BASE_ROUGHNESS
+    // MSFS clearcoat with "uniform base roughness" uses the map's roughness for the coat only
     info.perceptualRoughness *= mrSample.g;
+#endif
     info.metallic *= mrSample.b;
 #endif
 
@@ -389,7 +392,12 @@ MaterialInfo getClearCoatInfo(MaterialInfo info, NormalInfo normalInfo)
 
 #ifdef HAS_CLEARCOAT_ROUGHNESS_MAP
     vec4 clearcoatSampleRoughness = texture(u_ClearcoatRoughnessSampler, getClearcoatRoughnessUV());
+#ifdef MSFS_CLEARCOAT_ROUGHNESS_ALPHA
+    // MSFS clearcoat colour/roughness texture stores the roughness in alpha
+    info.clearcoatRoughness *= clearcoatSampleRoughness.a;
+#else
     info.clearcoatRoughness *= clearcoatSampleRoughness.g;
+#endif
 #endif
 
     info.clearcoatNormal = getClearcoatNormal(normalInfo);

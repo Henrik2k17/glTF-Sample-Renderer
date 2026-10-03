@@ -2,6 +2,7 @@ import { mat3, vec3, vec4 } from "gl-matrix";
 import { gltfTextureInfo } from "./texture.js";
 import { jsToGl, initGlForMembers } from "./utils.js";
 import { GltfObject } from "./gltf_object.js";
+import { translateMsfsMaterialJson } from "./msfs.js";
 
 class gltfMaterial extends GltfObject {
     static animatedProperties = ["alphaCutoff", "emissiveFactor"];
@@ -627,6 +628,10 @@ class gltfMaterial extends GltfObject {
     }
 
     fromJson(jsonMaterial) {
+        const msfs = translateMsfsMaterialJson(jsonMaterial);
+        jsonMaterial = msfs.json;
+        this.defines.push(...msfs.defines);
+
         super.fromJson(jsonMaterial);
 
         if (jsonMaterial.normalTexture !== undefined) {
