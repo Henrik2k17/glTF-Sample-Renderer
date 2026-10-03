@@ -163,6 +163,34 @@ class gltfMaterial extends GltfObject {
         }
     }
 
+    // Treat core textures whose image failed to load as absent, so the material falls back to
+    // its factors instead of sampling an empty texture.
+    dropUnloadedTextures(gltf) {
+        const isUnloaded = (textureInfo) => {
+            if (textureInfo === undefined) {
+                return false;
+            }
+            const texture = gltf.textures[textureInfo.index];
+            const image = gltf.images[texture?.source];
+            return image === undefined || !image.isLoaded();
+        };
+        if (isUnloaded(this.normalTexture)) {
+            this.normalTexture = undefined;
+        }
+        if (isUnloaded(this.occlusionTexture)) {
+            this.occlusionTexture = undefined;
+        }
+        if (isUnloaded(this.emissiveTexture)) {
+            this.emissiveTexture = undefined;
+        }
+        if (isUnloaded(this.pbrMetallicRoughness?.baseColorTexture)) {
+            this.pbrMetallicRoughness.baseColorTexture = undefined;
+        }
+        if (isUnloaded(this.pbrMetallicRoughness?.metallicRoughnessTexture)) {
+            this.pbrMetallicRoughness.metallicRoughnessTexture = undefined;
+        }
+    }
+
     parseTextureInfoExtensions(textureInfo, textureKey) {
         if (textureInfo.extensions?.KHR_texture_transform === undefined) {
             return;
@@ -183,6 +211,8 @@ class gltfMaterial extends GltfObject {
     }
 
     initGl(gltf, webGlContext) {
+        this.dropUnloadedTextures(gltf);
+
         if (this.normalTexture !== undefined) {
             this.normalTexture.samplerName = "u_NormalSampler";
             this.parseTextureInfoExtensions(this.normalTexture, "Normal");

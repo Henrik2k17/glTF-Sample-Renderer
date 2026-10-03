@@ -46,7 +46,7 @@ class gltfWebGl {
         }
 
         const image = gltf.images[gltfTex.source];
-        if (image === undefined) {
+        if (image === undefined || image.image === undefined) {
             return false;
         }
 

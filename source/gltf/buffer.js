@@ -69,21 +69,7 @@ class gltfBuffer extends GltfObject {
     }
 
     setBufferFromFiles(gltf, files, callback) {
-        if (this.uri === undefined || files === undefined) {
-            return false;
-        }
-        let actualPath = this.uri;
-        if (!ResourceLoaderUtils.isAbsoluteUrl(this.uri)) {
-            const parentPath = ResourceLoaderUtils.getContainingFolder(gltf.path ?? "");
-            actualPath = ResourceLoaderUtils.cleanRelativePath(parentPath + this.uri);
-        }
-
-        const foundFile = files.find((file) => {
-            if (file[0] == actualPath) {
-                return true;
-            }
-        });
-
+        const foundFile = ResourceLoaderUtils.findFile(files, this.uri, gltf.path);
         if (foundFile === undefined) {
             return false;
         }

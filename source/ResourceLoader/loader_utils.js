@@ -67,6 +67,70 @@ class ResourceLoaderUtils {
         const slashIndex = url.indexOf("/");
         return colonIndex !== -1 && (slashIndex === -1 || colonIndex < slashIndex);
     }
+
+    /**
+     * Finds the dropped file a glTF URI refers to.
+     * First tries the exact path resolved against the glTF's folder. If that fails, falls back
+     * to a case-insensitive file name match, preferring the candidate that shares the most
+     * trailing path segments with the URI. The fallback is needed for exporters such as the
+     * MSFS one, which reference textures outside the model folder (e.g. "../../Assets/x.png").
+     * @param {Array<[string, File]>} files - Dropped files as [path, file] pairs.
+     * @param {string} uri - The URI from the glTF.
+     * @param {string} gltfPath - Path of the glTF file, used to resolve relative URIs.
+     * @returns {[string, File] | undefined} The matching [path, file] pair, if any.
+     */
+    static findFile(files, uri, gltfPath) {
+        if (files === undefined || uri === undefined) {
+            return undefined;
+        }
+        let actualPath = uri;
+        if (!ResourceLoaderUtils.isAbsoluteUrl(uri)) {
+            const parentPath = ResourceLoaderUtils.getContainingFolder(gltfPath ?? "");
+            actualPath = ResourceLoaderUtils.cleanRelativePath(parentPath + uri);
+        }
+        const exactMatch = files.find((file) => file[0] == actualPath);
+        if (
+            exactMatch !== undefined ||
+            uri.startsWith("data:") ||
+            ResourceLoaderUtils.isAbsoluteUrl(uri)
+        ) {
+            return exactMatch;
+        }
+
+        let decodedUri = uri;
+        try {
+            decodedUri = decodeURI(uri);
+        } catch {
+            // keep the raw URI if it contains malformed escape sequences
+        }
+        const uriSegments = decodedUri
+            .replace(/\\/g, "/")
+            .toLowerCase()
+            .split("/")
+            .filter((segment) => segment !== "" && segment !== "." && segment !== "..");
+        if (uriSegments.length === 0) {
+            return undefined;
+        }
+        let bestMatch = undefined;
+        let bestScore = 0;
+        for (const file of files) {
+            const fileSegments = file[0].replace(/\\/g, "/").toLowerCase().split("/");
+            let score = 0;
+            while (
+                score < uriSegments.length &&
+                score < fileSegments.length &&
+                uriSegments[uriSegments.length - 1 - score] ===
+                    fileSegments[fileSegments.length - 1 - score]
+            ) {
+                score++;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatch = file;
+            }
+        }
+        return bestMatch;
+    }
 }
 
 export { ResourceLoaderUtils };

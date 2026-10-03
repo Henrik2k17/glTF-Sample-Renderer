@@ -35,16 +35,40 @@ class gltfImage extends GltfObject {
             return;
         }
 
-        if (
-            !(await this.setImageFromBufferView(gltf)) &&
-            !(await this.setImageFromFiles(gltf, additionalFiles)) &&
-            !(await this.setImageFromUri(gltf, allowResourceAbsolutePath)) &&
-            !(await this.setImageFromBase64(gltf))
-        ) {
-            return;
+        // A missing or undecodable image must not abort loading the whole model. Textures that
+        // reference an unloaded image are skipped by the material (see gltfMaterial.initGl).
+        // Logged as info: the sample viewer turns warnings into UI toasts, and a model with many
+        // missing textures would otherwise flood the UI. Callers can check isLoaded() instead.
+        let reason = "";
+        try {
+            await this.loadFromSources(gltf, additionalFiles, allowResourceAbsolutePath);
+        } catch (error) {
+            reason = `: ${error?.message ?? error}`;
         }
+        if (this.image === undefined) {
+            console.info(`Image "${this.uri ?? this.name}" could not be loaded${reason}`);
+        }
+    }
 
-        return;
+    async loadFromSources(gltf, additionalFiles, allowResourceAbsolutePath) {
+        // For dropped models, a relative URI that is not among the dropped files would only
+        // resolve against the viewer's own server, so don't fetch it.
+        const isMissingDroppedFile =
+            additionalFiles !== undefined &&
+            this.uri !== undefined &&
+            !this.uri.startsWith("data:") &&
+            !ResourceLoaderUtils.isAbsoluteUrl(this.uri);
+        return (
+            (await this.setImageFromBufferView(gltf)) ||
+            (await this.setImageFromFiles(gltf, additionalFiles)) ||
+            (!isMissingDroppedFile &&
+                (await this.setImageFromUri(gltf, allowResourceAbsolutePath))) ||
+            (await this.setImageFromBase64(gltf))
+        );
+    }
+
+    isLoaded() {
+        return this.image !== undefined;
     }
 
     static loadHTMLImage(url) {
@@ -189,21 +213,7 @@ class gltfImage extends GltfObject {
     }
 
     async setImageFromFiles(gltf, files) {
-        if (this.uri === undefined || files === undefined) {
-            return false;
-        }
-        let actualPath = this.uri;
-        if (!ResourceLoaderUtils.isAbsoluteUrl(this.uri)) {
-            const parentPath = ResourceLoaderUtils.getContainingFolder(gltf.path ?? "");
-            actualPath = ResourceLoaderUtils.cleanRelativePath(parentPath + this.uri);
-        }
-
-        let foundFile = files.find((file) => {
-            if (file[0] == actualPath) {
-                return true;
-            }
-        });
-
+        const foundFile = ResourceLoaderUtils.findFile(files, this.uri, gltf.path);
         if (foundFile === undefined) {
             return false;
         }
