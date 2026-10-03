@@ -5,6 +5,7 @@ import { gltfAnimationSampler } from "./animation_sampler.js";
 import { gltfInterpolator } from "./interpolator.js";
 import { AnimatableProperty } from "./animatable_property.js";
 import { JsonPointer } from "json-ptr";
+import { translateMsfsAnimationJson } from "./msfs.js";
 
 class gltfAnimation extends GltfObject {
     static animatedProperties = [];
@@ -33,6 +34,7 @@ class gltfAnimation extends GltfObject {
     }
 
     fromJson(jsonAnimation) {
+        jsonAnimation = translateMsfsAnimationJson(jsonAnimation);
         super.fromJson(jsonAnimation);
 
         this.channels = objectsFromJsons(jsonAnimation.channels, gltfAnimationChannel);

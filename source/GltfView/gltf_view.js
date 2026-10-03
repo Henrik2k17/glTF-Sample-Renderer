@@ -227,7 +227,19 @@ class GltfView {
         const t = state.animationTimer.elapsedSec();
 
         for (const animation of enabledAnimations) {
-            animation.advance(state.gltf, t);
+            let time = state.animationTimeOverrides?.get(animation.gltfObjectIndex);
+            if (time === undefined) {
+                time = t;
+            } else {
+                // An override is an exact position, not playback: clamp instead of looping.
+                // Otherwise a time a hair past the end (e.g. frame 100 / 30 fps vs. the float32
+                // max of the input accessor) wraps around to the first keyframe.
+                animation.computeMinMaxTime(state.gltf);
+                if (animation.minTime !== undefined && animation.maxTime !== undefined) {
+                    time = Math.min(Math.max(time, animation.minTime), animation.maxTime);
+                }
+            }
+            animation.advance(state.gltf, time);
         }
     }
 }

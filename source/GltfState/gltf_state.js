@@ -28,6 +28,11 @@ class GltfState {
         this.cameraNodeIndex = undefined;
         /** indices of active animations */
         this.animationIndices = [];
+        /**
+         * Per animation time in seconds, keyed by animation index. Active animations with an
+         * entry are evaluated at this time instead of the animation timer (e.g. for scrubbing).
+         */
+        this.animationTimeOverrides = new Map();
         /** animation timer allows to control the animation time */
         this.animationTimer = new AnimationTimer();
         /** KHR_materials_variants */
