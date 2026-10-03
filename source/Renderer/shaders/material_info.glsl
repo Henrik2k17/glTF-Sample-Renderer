@@ -176,6 +176,9 @@ NormalInfo getNormalInfo(vec3 v)
     info.ng = ng;
 #ifdef HAS_NORMAL_MAP
     info.ntex = texture(u_NormalSampler, UV).rgb * 2.0 - vec3(1.0);
+#ifdef NORMAL_MAP_DIRECTX
+    info.ntex.y = -info.ntex.y;
+#endif
     info.ntex *= vec3(u_NormalScale, u_NormalScale, 1.0);
     info.ntex = normalize(info.ntex);
     info.n = normalize(mat3(t, b, ng) * info.ntex);
@@ -198,6 +201,9 @@ vec3 getClearcoatNormal(NormalInfo normalInfo)
 {
 #ifdef HAS_CLEARCOAT_NORMAL_MAP
     vec3 n = texture(u_ClearcoatNormalSampler, getClearcoatNormalUV()).rgb * 2.0 - vec3(1.0);
+#ifdef NORMAL_MAP_DIRECTX
+    n.y = -n.y;
+#endif
     n *= vec3(u_ClearcoatNormalScale, u_ClearcoatNormalScale, 1.0);
     n = mat3(normalInfo.t, normalInfo.b, normalInfo.ng) * normalize(n);
     return n;

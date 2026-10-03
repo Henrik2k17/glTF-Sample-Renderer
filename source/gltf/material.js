@@ -213,6 +213,14 @@ class gltfMaterial extends GltfObject {
     initGl(gltf, webGlContext) {
         this.dropUnloadedTextures(gltf);
 
+        // MSFS assets declare whether tangent space normal maps use the DirectX (green down)
+        // or OpenGL (green up, glTF default) convention.
+        const tangentSpaceConvention =
+            gltf.asset?.extensions?.ASOBO_normal_map_convention?.tangent_space_convention;
+        if (tangentSpaceConvention?.toLowerCase() === "directx") {
+            this.defines.push("NORMAL_MAP_DIRECTX 1");
+        }
+
         if (this.normalTexture !== undefined) {
             this.normalTexture.samplerName = "u_NormalSampler";
             this.parseTextureInfoExtensions(this.normalTexture, "Normal");
