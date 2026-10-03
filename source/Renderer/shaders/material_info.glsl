@@ -179,6 +179,9 @@ NormalInfo getNormalInfo(vec3 v)
 #ifdef NORMAL_MAP_DIRECTX
     info.ntex.y = -info.ntex.y;
 #endif
+#ifdef NORMAL_MAP_RECONSTRUCT_Z
+    info.ntex.z = sqrt(max(0.0, 1.0 - dot(info.ntex.xy, info.ntex.xy)));
+#endif
     info.ntex *= vec3(u_NormalScale, u_NormalScale, 1.0);
     info.ntex = normalize(info.ntex);
     info.n = normalize(mat3(t, b, ng) * info.ntex);
@@ -203,6 +206,9 @@ vec3 getClearcoatNormal(NormalInfo normalInfo)
     vec3 n = texture(u_ClearcoatNormalSampler, getClearcoatNormalUV()).rgb * 2.0 - vec3(1.0);
 #ifdef NORMAL_MAP_DIRECTX
     n.y = -n.y;
+#endif
+#ifdef CLEARCOAT_NORMAL_MAP_RECONSTRUCT_Z
+    n.z = sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
 #endif
     n *= vec3(u_ClearcoatNormalScale, u_ClearcoatNormalScale, 1.0);
     n = mat3(normalInfo.t, normalInfo.b, normalInfo.ng) * normalize(n);

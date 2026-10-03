@@ -222,6 +222,18 @@ class gltfMaterial extends GltfObject {
             this.defines.push("NORMAL_MAP_DIRECTX 1");
         }
 
+        // Two channel (BC5) normal maps only store X and Y.
+        const isTwoChannel = (textureInfo) => {
+            const texture = gltf.textures[textureInfo?.index];
+            return gltf.images[texture?.source]?.image?.compressed?.format === "BC5";
+        };
+        if (isTwoChannel(this.normalTexture)) {
+            this.defines.push("NORMAL_MAP_RECONSTRUCT_Z 1");
+        }
+        if (isTwoChannel(this.extensions?.KHR_materials_clearcoat?.clearcoatNormalTexture)) {
+            this.defines.push("CLEARCOAT_NORMAL_MAP_RECONSTRUCT_Z 1");
+        }
+
         if (this.normalTexture !== undefined) {
             this.normalTexture.samplerName = "u_NormalSampler";
             this.parseTextureInfoExtensions(this.normalTexture, "Normal");

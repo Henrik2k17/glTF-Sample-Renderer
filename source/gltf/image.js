@@ -5,6 +5,7 @@ import { ImageMimeType } from "./image_mime_type.js";
 import * as jpeg from "jpeg-js";
 import * as png from "fast-png";
 import { ResourceLoaderUtils } from "../ResourceLoader/loader_utils.js";
+import { isDecodedImageType, decodeImageBytes } from "../ResourceLoader/image_decoders.js";
 
 class gltfImage extends GltfObject {
     static animatedProperties = [];
@@ -91,6 +92,12 @@ class gltfImage extends GltfObject {
             this.mimeType = ImageMimeType.PNG;
         } else if (extension == "webp") {
             this.mimeType = ImageMimeType.WEBP;
+        } else if (extension == "dds") {
+            this.mimeType = ImageMimeType.DDS;
+        } else if (extension == "tga") {
+            this.mimeType = ImageMimeType.TGA;
+        } else if (extension == "tif" || extension == "tiff") {
+            this.mimeType = ImageMimeType.TIFF;
         } else {
             console.warn("MimeType not defined");
             // assume jpeg encoding as best guess
@@ -99,7 +106,9 @@ class gltfImage extends GltfObject {
     }
 
     async setImageFromBytes(gltf, array) {
-        if (this.mimeType === ImageMimeType.KTX2) {
+        if (isDecodedImageType(this.mimeType)) {
+            this.image = decodeImageBytes(this.mimeType, array);
+        } else if (this.mimeType === ImageMimeType.KTX2) {
             if (gltf.ktxDecoder !== undefined) {
                 this.image = await gltf.ktxDecoder.loadKtxFromBuffer(array);
             } else {
@@ -172,7 +181,16 @@ class gltfImage extends GltfObject {
             this.setMimetypeFromFilename(this.uri);
         }
 
-        if (this.mimeType === ImageMimeType.KTX2) {
+        if (isDecodedImageType(this.mimeType)) {
+            const response = await fetch(fullPath);
+            if (!response.ok) {
+                throw new Error(`Could not load image from ${fullPath}`);
+            }
+            this.image = decodeImageBytes(
+                this.mimeType,
+                new Uint8Array(await response.arrayBuffer())
+            );
+        } else if (this.mimeType === ImageMimeType.KTX2) {
             if (gltf.ktxDecoder !== undefined) {
                 this.image = await gltf.ktxDecoder.loadKtxFromUri(fullPath);
             } else {
@@ -222,7 +240,10 @@ class gltfImage extends GltfObject {
             this.setMimetypeFromFilename(foundFile[0]);
         }
 
-        if (this.mimeType === ImageMimeType.KTX2) {
+        if (isDecodedImageType(this.mimeType)) {
+            const data = new Uint8Array(await foundFile[1].arrayBuffer());
+            this.image = decodeImageBytes(this.mimeType, data);
+        } else if (this.mimeType === ImageMimeType.KTX2) {
             if (gltf.ktxDecoder !== undefined) {
                 const data = new Uint8Array(await foundFile[1].arrayBuffer());
                 this.image = await gltf.ktxDecoder.loadKtxFromBuffer(data);

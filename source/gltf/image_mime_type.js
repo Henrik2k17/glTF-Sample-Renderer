@@ -4,6 +4,9 @@ const ImageMimeType = {
     WEBP: "image/webp",
     HDR: "image/vnd.radiance",
     KTX2: "image/ktx2",
+    DDS: "image/vnd-ms.dds",
+    TGA: "image/x-tga",
+    TIFF: "image/tiff",
     GLTEXTURE: "image/texture"
 };
 

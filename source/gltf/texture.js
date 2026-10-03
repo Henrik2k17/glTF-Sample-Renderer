@@ -45,6 +45,16 @@ class gltfTexture extends GltfObject {
         ) {
             this.source = jsonTexture.extensions.KHR_texture_basisu.source;
         }
+        // MSFS exporters reference DDS images only through MSFT_texture_dds
+        if (
+            this.source === undefined &&
+            jsonTexture.extensions?.MSFT_texture_dds?.source !== undefined
+        ) {
+            this.source = jsonTexture.extensions.MSFT_texture_dds.source;
+            if (this.sampler === undefined) {
+                this.sampler = jsonTexture.extensions.MSFT_texture_dds.sampler;
+            }
+        }
     }
 
     destroy() {

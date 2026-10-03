@@ -36,7 +36,8 @@
         "jpeg-js": "^0.4.3",
         "json-ptr": "^3.1.0",
         "meshoptimizer": "^1.0.1",
-        "physx-js-webidl": "2.7.2"
+        "physx-js-webidl": "2.7.2",
+        "utif": "^3.1.0"
     },
     "devDependencies": {
         "@playwright/test": "^1.56.0",

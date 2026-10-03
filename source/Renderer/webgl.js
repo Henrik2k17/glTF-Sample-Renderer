@@ -1,4 +1,5 @@
 import { ImageMimeType } from "../gltf/image_mime_type.js";
+import { isDecodedImageType } from "../ResourceLoader/image_decoders.js";
 
 let GL = undefined;
 
@@ -32,6 +33,86 @@ class gltfWebGl {
         this.context.supports_EXT_color_buffer_half_float =
             this.context.supports_EXT_color_buffer_float ||
             (this.context.getExtension("EXT_color_buffer_half_float") ? true : false);
+
+        // Block-compressed formats used by DDS textures
+        this.context.compressedTextureExtensions = {
+            s3tc: this.context.getExtension("WEBGL_compressed_texture_s3tc"),
+            s3tcSrgb: this.context.getExtension("WEBGL_compressed_texture_s3tc_srgb"),
+            rgtc: this.context.getExtension("EXT_texture_compression_rgtc"),
+            bptc: this.context.getExtension("EXT_texture_compression_bptc")
+        };
+    }
+
+    /**
+     * Returns the WebGL internal format for a block-compressed DDS format, or undefined if the
+     * GPU does not support it. BC4 and BC5 have no sRGB variant and are always linear.
+     */
+    getCompressedInternalFormat(format, linear) {
+        const ext = this.context.compressedTextureExtensions ?? {};
+        switch (format) {
+            case "BC1":
+                return linear
+                    ? ext.s3tc?.COMPRESSED_RGBA_S3TC_DXT1_EXT
+                    : ext.s3tcSrgb?.COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT;
+            case "BC2":
+                return linear
+                    ? ext.s3tc?.COMPRESSED_RGBA_S3TC_DXT3_EXT
+                    : ext.s3tcSrgb?.COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT;
+            case "BC3":
+                return linear
+                    ? ext.s3tc?.COMPRESSED_RGBA_S3TC_DXT5_EXT
+                    : ext.s3tcSrgb?.COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
+            case "BC4":
+                return ext.rgtc?.COMPRESSED_RED_RGTC1_EXT;
+            case "BC5":
+                return ext.rgtc?.COMPRESSED_RED_GREEN_RGTC2_EXT;
+            case "BC7":
+                return linear
+                    ? ext.bptc?.COMPRESSED_RGBA_BPTC_UNORM_EXT
+                    : ext.bptc?.COMPRESSED_SRGB_ALPHA_BPTC_UNORM_EXT;
+            default:
+                return undefined;
+        }
+    }
+
+    // Uploads an image produced by ResourceLoader/image_decoders.js (DDS, TGA, TIFF).
+    uploadDecodedImage(image, textureInfo, target) {
+        const decoded = image.image;
+        if (decoded.compressed !== undefined) {
+            const { format, levels } = decoded.compressed;
+            const internalFormat = this.getCompressedInternalFormat(format, textureInfo.linear);
+            if (internalFormat === undefined) {
+                console.warn(`${format} compressed textures are not supported by this GPU/browser`);
+                return;
+            }
+            levels.forEach((level, index) =>
+                this.context.compressedTexImage2D(
+                    target,
+                    index,
+                    internalFormat,
+                    level.width,
+                    level.height,
+                    0,
+                    level.data
+                )
+            );
+            // Compressed textures cannot generate mipmaps; restrict sampling to the stored levels.
+            this.context.texParameteri(target, GL.TEXTURE_MAX_LEVEL, levels.length - 1);
+            return;
+        }
+        const internalFormat =
+            textureInfo.linear || GL.SRGB8_ALPHA8 === undefined ? GL.RGBA : GL.SRGB8_ALPHA8;
+        this.context.texImage2D(
+            target,
+            image.miplevel,
+            internalFormat,
+            decoded.width,
+            decoded.height,
+            0,
+            GL.RGBA,
+            GL.UNSIGNED_BYTE,
+            decoded.data
+        );
     }
 
     setTexture(loc, gltf, textureInfo, texSlot) {
@@ -113,11 +194,13 @@ class gltfWebGl {
                     GL.UNSIGNED_BYTE,
                     image.image
                 );
+            } else if (isDecodedImageType(image.mimeType)) {
+                this.uploadDecodedImage(image, textureInfo, image.type);
             }
 
             this.setSampler(gltfSampler, gltfTex.type, textureInfo.generateMips);
 
-            if (textureInfo.generateMips) {
+            if (textureInfo.generateMips && image.image.compressed === undefined) {
                 switch (gltfSampler.minFilter) {
                     case GL.NEAREST_MIPMAP_NEAREST:
                     case GL.NEAREST_MIPMAP_LINEAR:
