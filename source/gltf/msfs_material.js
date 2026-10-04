@@ -167,6 +167,9 @@ function initMsfsMaterial(material, gltf) {
             // Sampled raw: as an overlay 0.5 is neutral; as a blend color it is decoded in the shader.
             msfs.detailColor = addTexture(material, gltf, detail.detailColorTexture, "u_MsfsDetailColorSampler", true, "MSFS_DETAIL_COLOR_MAP 1");
             msfs.detailNormal = addTexture(material, gltf, detail.detailNormalTexture, "u_MsfsDetailNormalSampler", true, "MSFS_DETAIL_NORMAL_MAP 1");
+            if (gltf.images[gltf.textures[msfs.detailNormal?.index]?.source]?.image?.compressed?.format === "BC5_SNORM") {
+                material.defines.push("MSFS_DETAIL_NORMAL_SNORM 1");
+            }
         }
         // A blend mask also flattens the base normal map where the detail shows.
         if (msfs.detailNormal !== undefined || (msfs.blendMask !== undefined && material.normalTexture !== undefined)) {

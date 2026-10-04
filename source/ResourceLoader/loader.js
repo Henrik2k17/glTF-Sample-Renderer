@@ -1,4 +1,5 @@
 import { generateTangentsInWorkers } from "../gltf/tangent_workers.js";
+import { decodeMsfsCompiledGeometry } from "../gltf/msfs_compiled.js";
 
 class gltfLoader {
     /**
@@ -23,6 +24,8 @@ class gltfLoader {
         );
 
         await buffersPromise; // images might be stored in the buffers
+        // MSFS 2024 compiled glTFs: shared draw ranges and packed vertices to standard glTF
+        decodeMsfsCompiledGeometry(gltf);
         const imagesPromise = gltfLoader.loadImages(
             gltf,
             additionalFiles,

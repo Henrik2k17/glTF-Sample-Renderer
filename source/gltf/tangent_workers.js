@@ -239,4 +239,4 @@ function pushAccessor(gltf, data, type, componentType, target) {
     return gltf.accessors.length - 1;
 }
 
-export { generateTangentsInWorkers };
+export { generateTangentsInWorkers, pushAccessor };

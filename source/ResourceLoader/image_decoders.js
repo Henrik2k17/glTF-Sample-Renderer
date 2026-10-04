@@ -1,5 +1,6 @@
-// Decoders for image formats browsers cannot load natively: DDS, TGA and TIFF.
-// MSFS exporters reference source textures in these formats (DDS via MSFT_texture_dds).
+// Decoders for image formats browsers cannot load natively: DDS, TGA and TIFF, and KTX2 files
+// that hold plain block-compressed data. MSFS exporters reference source textures in these
+// formats (DDS via MSFT_texture_dds); MSFS 2024 package builds compile textures to such KTX2.
 //
 // Decoded images are plain objects:
 // - { width, height, data: Uint8Array } with tightly packed RGBA8 rows, top row first, or
@@ -19,8 +20,82 @@ const CompressedFormats = {
     BC3: { blockBytes: 16, channels: 4 },
     BC4: { blockBytes: 8, channels: 1 },
     BC5: { blockBytes: 16, channels: 2 },
-    BC7: { blockBytes: 16, channels: 4 }
+    BC7: { blockBytes: 16, channels: 4 },
+    // signed variants: sampled as -1..1 (e.g. MSFS normal maps)
+    BC4_SNORM: { blockBytes: 8, channels: 1 },
+    BC5_SNORM: { blockBytes: 16, channels: 2 }
 };
+
+// KTX2 vkFormat values of the block-compressed formats above
+const VkFormats = {
+    131: "BC1", // BC1_RGB_UNORM
+    132: "BC1", // BC1_RGB_SRGB
+    133: "BC1", // BC1_RGBA_UNORM
+    134: "BC1", // BC1_RGBA_SRGB
+    135: "BC2",
+    136: "BC2",
+    137: "BC3",
+    138: "BC3",
+    139: "BC4",
+    140: "BC4_SNORM",
+    141: "BC5",
+    142: "BC5_SNORM",
+    145: "BC7",
+    146: "BC7"
+};
+
+const Ktx2Identifier = [0xab, 0x4b, 0x54, 0x58, 0x20, 0x32, 0x30, 0xbb, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/**
+ * True for a KTX2 file with block-compressed data and no supercompression, which can be
+ * uploaded without transcoding (Basis Universal files need libktx instead).
+ * @param {Uint8Array} bytes
+ */
+function isBlockCompressedKtx2(bytes) {
+    if (bytes.byteLength < 80 || Ktx2Identifier.some((value, i) => bytes[i] !== value)) {
+        return false;
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return VkFormats[view.getUint32(12, true)] !== undefined && view.getUint32(44, true) === 0;
+}
+
+/**
+ * Decodes a block-compressed KTX2 file (see isBlockCompressedKtx2). 2D textures only.
+ * @param {Uint8Array} bytes
+ * @returns {object} A decoded image (see top of file).
+ */
+function decodeBlockCompressedKtx2(bytes) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const format = VkFormats[view.getUint32(12, true)];
+    const width = view.getUint32(20, true);
+    const height = Math.max(1, view.getUint32(24, true));
+    const depth = view.getUint32(28, true);
+    const layers = view.getUint32(32, true);
+    const faces = view.getUint32(36, true);
+    if (depth > 1 || layers > 1 || faces > 1) {
+        throw new Error("Only 2D KTX2 textures are supported");
+    }
+    const levelCount = Math.max(1, view.getUint32(40, true));
+    const levels = [];
+    for (let level = 0; level < levelCount; level++) {
+        // Level index: byteOffset, byteLength, uncompressedByteLength (uint64 each), level 0 first
+        const entry = 80 + level * 24;
+        const offset = Number(view.getBigUint64(entry, true));
+        const length = Number(view.getBigUint64(entry + 8, true));
+        if (offset + length > bytes.byteLength) {
+            break; // truncated file, keep the levels that are there
+        }
+        levels.push({
+            width: Math.max(1, width >> level),
+            height: Math.max(1, height >> level),
+            data: bytes.subarray(offset, offset + length)
+        });
+    }
+    if (levels.length === 0) {
+        throw new Error("KTX2 file contains no image data");
+    }
+    return { width, height, compressed: { format, levels } };
+}
 
 function fourCC(value) {
     return String.fromCharCode(
@@ -336,6 +411,8 @@ function decodeImageBytes(mimeType, bytes) {
 
 export {
     CompressedFormats,
+    isBlockCompressedKtx2,
+    decodeBlockCompressedKtx2,
     isDecodedImageType,
     decodeImageBytes,
     decodeDds,

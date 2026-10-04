@@ -220,7 +220,11 @@ vec3 applyMsfsDetailNormal(vec3 n)
 {
     vec2 detail = vec2(0.0);
 #ifdef MSFS_DETAIL_NORMAL_MAP
+#ifdef MSFS_DETAIL_NORMAL_SNORM
+    detail = texture(u_MsfsDetailNormalSampler, getMsfsDetailUV(u_MsfsDetailNormalUVSet)).rg;
+#else
     detail = texture(u_MsfsDetailNormalSampler, getMsfsDetailUV(u_MsfsDetailNormalUVSet)).rg * 2.0 - vec2(1.0);
+#endif
 #ifdef NORMAL_MAP_DIRECTX
     detail.y = -detail.y;
 #endif
@@ -453,7 +457,12 @@ NormalInfo getNormalInfo(vec3 v)
 #if defined(HAS_NORMAL_MAP) || defined(MSFS_DETAIL_AFFECTS_NORMAL)
     info.ntex = vec3(0.0, 0.0, 1.0);
 #ifdef HAS_NORMAL_MAP
+#ifdef NORMAL_MAP_SNORM
+    // signed texture format (e.g. BC5 SNORM in MSFS 2024 compiled KTX2): already -1..1
+    info.ntex = texture(u_NormalSampler, UV).rgb;
+#else
     info.ntex = texture(u_NormalSampler, UV).rgb * 2.0 - vec3(1.0);
+#endif
 #ifdef NORMAL_MAP_DIRECTX
     info.ntex.y = -info.ntex.y;
 #endif
@@ -487,7 +496,11 @@ NormalInfo getNormalInfo(vec3 v)
 vec3 getClearcoatNormal(NormalInfo normalInfo)
 {
 #ifdef HAS_CLEARCOAT_NORMAL_MAP
+#ifdef CLEARCOAT_NORMAL_MAP_SNORM
+    vec3 n = texture(u_ClearcoatNormalSampler, getClearcoatNormalUV()).rgb;
+#else
     vec3 n = texture(u_ClearcoatNormalSampler, getClearcoatNormalUV()).rgb * 2.0 - vec3(1.0);
+#endif
 #ifdef NORMAL_MAP_DIRECTX
     n.y = -n.y;
 #endif

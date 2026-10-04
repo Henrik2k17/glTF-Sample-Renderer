@@ -4,7 +4,12 @@ import { ImageMimeType } from "./image_mime_type.js";
 import * as jpeg from "jpeg-js";
 import * as png from "fast-png";
 import { ResourceLoaderUtils } from "../ResourceLoader/loader_utils.js";
-import { isDecodedImageType, decodeImageBytes } from "../ResourceLoader/image_decoders.js";
+import {
+    isDecodedImageType,
+    decodeImageBytes,
+    isBlockCompressedKtx2,
+    decodeBlockCompressedKtx2
+} from "../ResourceLoader/image_decoders.js";
 
 class gltfImage extends GltfObject {
     static animatedProperties = [];
@@ -74,6 +79,9 @@ class gltfImage extends GltfObject {
             } catch (error) {
                 uriError = error;
             }
+        }
+        if (!isMissingDroppedFile && (await this.setImageFromTextureCfg(gltf))) {
+            return true;
         }
         if (await this.setImageFromResolver(gltf)) {
             return true;
@@ -181,15 +189,25 @@ class gltfImage extends GltfObject {
         }
     }
 
+    /**
+     * KTX2 with plain block-compressed data (e.g. textures compiled by MSFS 2024) is uploaded
+     * as is; other KTX2 files (Basis Universal) are transcoded by libktx.
+     */
+    async setKtx2FromBytes(gltf, array) {
+        if (isBlockCompressedKtx2(array)) {
+            this.image = decodeBlockCompressedKtx2(array);
+        } else if (gltf.ktxDecoder !== undefined) {
+            this.image = await gltf.ktxDecoder.loadKtxFromBuffer(array);
+        } else {
+            console.warn("Loading of ktx images failed: KtxDecoder not initalized");
+        }
+    }
+
     async setImageFromBytes(gltf, array) {
         if (isDecodedImageType(this.mimeType)) {
             this.image = decodeImageBytes(this.mimeType, array);
         } else if (this.mimeType === ImageMimeType.KTX2) {
-            if (gltf.ktxDecoder !== undefined) {
-                this.image = await gltf.ktxDecoder.loadKtxFromBuffer(array);
-            } else {
-                console.warn("Loading of ktx images failed: KtxDecoder not initalized");
-            }
+            await this.setKtx2FromBytes(gltf, array);
         } else if (
             typeof Image !== "undefined" &&
             (this.mimeType === ImageMimeType.JPEG ||
@@ -243,6 +261,78 @@ class gltfImage extends GltfObject {
         return await this.setImageFromBytes(gltf, new Uint8Array(buffer));
     }
 
+    /**
+     * MSFS packages list shared texture folders in texture.cfg next to a model's textures
+     * ([fltsim] fallback.1=..\..\Assets\texture, ...). The sim looks for a texture by file name
+     * in the model's texture folder (model/../texture) and then in these fallbacks; compiled
+     * glTFs even declare that only the file name of an image URI counts
+     * (ASOBO_asset_optimized.UseOnlyFilenameForImageURI). Done here for models loaded from a URL,
+     * after the URI itself; the URI's own folder and its texture.cfg are tried last.
+     */
+    async setImageFromTextureCfg(gltf) {
+        if (typeof this.uri !== "string" || this.uri.startsWith("data:") || !gltf.path) {
+            return false;
+        }
+        const uri = this.uri.replace(/\\/g, "/");
+        const fileName = uri.substring(uri.lastIndexOf("/") + 1);
+        let textureFolders;
+        try {
+            const modelUrl = new URL(gltf.path, globalThis.location?.href);
+            textureFolders = [
+                new URL("../texture/", modelUrl),
+                new URL(uri.substring(0, uri.lastIndexOf("/") + 1), modelUrl)
+            ];
+        } catch {
+            return false;
+        }
+        gltf.msfsTextureFallbacks ??= new Map();
+        const folders = [];
+        for (const textureFolder of textureFolders) {
+            const key = textureFolder.href;
+            if (!gltf.msfsTextureFallbacks.has(key)) {
+                gltf.msfsTextureFallbacks.set(key, gltfImage.readTextureCfg(textureFolder));
+            }
+            folders.push(textureFolder, ...(await gltf.msfsTextureFallbacks.get(key)));
+        }
+        const tried = new Set([new URL(uri, new URL(gltf.path, globalThis.location?.href)).href]);
+        for (const folder of folders) {
+            const candidate = new URL(fileName, folder).href;
+            if (tried.has(candidate)) {
+                continue;
+            }
+            tried.add(candidate);
+            try {
+                if (await this.setImageFromUrl(gltf, candidate)) {
+                    return true;
+                }
+            } catch {
+                // not in this folder
+            }
+        }
+        return false;
+    }
+
+    /** @returns {Promise<URL[]>} the fallback folders of the texture.cfg in a folder, in order */
+    static async readTextureCfg(textureFolder) {
+        try {
+            const response = await fetch(new URL("texture.cfg", textureFolder));
+            if (!response.ok) {
+                return [];
+            }
+            return (await response.text())
+                .split(/\r?\n/)
+                .map((line) => /^\s*fallback\.(\d+)\s*=\s*(.+?)\s*$/i.exec(line))
+                .filter((match) => match !== null)
+                .sort((a, b) => Number(a[1]) - Number(b[1]))
+                .map(
+                    (match) =>
+                        new URL(match[2].replace(/\\/g, "/").replace(/\/?$/, "/"), textureFolder)
+                );
+        } catch {
+            return [];
+        }
+    }
+
     async setImageFromUri(gltf, allowResourceAbsolutePath) {
         if (this.uri === undefined || this.uri.startsWith("data:")) {
             return false;
@@ -251,7 +341,10 @@ class gltfImage extends GltfObject {
             throw new Error("Absolute URLs are not allowed for security reasons: " + this.uri);
         }
         const parentPath = ResourceLoaderUtils.getContainingFolder(gltf.path ?? "");
-        const fullPath = parentPath + this.uri;
+        return await this.setImageFromUrl(gltf, parentPath + this.uri);
+    }
+
+    async setImageFromUrl(gltf, fullPath) {
         if (this.mimeType === undefined) {
             this.setMimetypeFromFilename(this.uri);
         }
@@ -266,11 +359,11 @@ class gltfImage extends GltfObject {
                 new Uint8Array(await response.arrayBuffer())
             );
         } else if (this.mimeType === ImageMimeType.KTX2) {
-            if (gltf.ktxDecoder !== undefined) {
-                this.image = await gltf.ktxDecoder.loadKtxFromUri(fullPath);
-            } else {
-                console.warn("Loading of ktx images failed: KtxDecoder not initalized");
+            const response = await fetch(fullPath);
+            if (!response.ok) {
+                throw new Error(`Could not load image from ${fullPath}`);
             }
+            await this.setKtx2FromBytes(gltf, new Uint8Array(await response.arrayBuffer()));
         } else if (
             typeof Image !== "undefined" &&
             (this.mimeType === ImageMimeType.JPEG ||
@@ -322,12 +415,7 @@ class gltfImage extends GltfObject {
             const data = new Uint8Array(await file.arrayBuffer());
             this.image = decodeImageBytes(this.mimeType, data);
         } else if (this.mimeType === ImageMimeType.KTX2) {
-            if (gltf.ktxDecoder !== undefined) {
-                const data = new Uint8Array(await file.arrayBuffer());
-                this.image = await gltf.ktxDecoder.loadKtxFromBuffer(data);
-            } else {
-                console.warn("Loading of ktx images failed: KtxDecoder not initalized");
-            }
+            await this.setKtx2FromBytes(gltf, new Uint8Array(await file.arrayBuffer()));
         } else if (
             typeof Image !== "undefined" &&
             (this.mimeType === ImageMimeType.JPEG ||

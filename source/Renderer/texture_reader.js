@@ -13,10 +13,20 @@ precision highp float;
 uniform sampler2D u_Texture;
 uniform vec2 u_Size;
 uniform bool u_EncodeSRGB;
+uniform bool u_Signed;
+uniform bool u_TwoChannel;
 out vec4 color;
 void main() {
     // Row 0 of the read back pixels is v = 0, the first row of the image.
     vec4 texel = texture(u_Texture, gl_FragCoord.xy / u_Size);
+    if (u_Signed) {
+        // signed formats (BC4/BC5 SNORM) sample as -1..1; show them as stored in unsigned maps
+        texel.rgb = texel.rgb * 0.5 + 0.5;
+    }
+    if (u_TwoChannel) {
+        // BC5 normal maps store X and Y only; show them like a full normal map
+        texel.b = 1.0;
+    }
     if (u_EncodeSRGB) {
         vec3 c = clamp(texel.rgb, 0.0, 1.0);
         texel.rgb = mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
@@ -57,7 +67,9 @@ class TextureReader {
         this.locations = {
             texture: gl.getUniformLocation(program, "u_Texture"),
             size: gl.getUniformLocation(program, "u_Size"),
-            encodeSRGB: gl.getUniformLocation(program, "u_EncodeSRGB")
+            encodeSRGB: gl.getUniformLocation(program, "u_EncodeSRGB"),
+            signed: gl.getUniformLocation(program, "u_Signed"),
+            twoChannel: gl.getUniformLocation(program, "u_TwoChannel")
         };
         this.vertexArray = gl.createVertexArray();
     }
@@ -118,6 +130,9 @@ class TextureReader {
                 gl.bindSampler(0, null);
                 gl.uniform2f(this.locations.size, width, height);
                 gl.uniform1i(this.locations.encodeSRGB, srgb ? 1 : 0);
+                const format = image.image.compressed?.format ?? "";
+                gl.uniform1i(this.locations.signed, format.endsWith("_SNORM") ? 1 : 0);
+                gl.uniform1i(this.locations.twoChannel, format.startsWith("BC5") ? 1 : 0);
                 gl.bindVertexArray(this.vertexArray);
                 gl.disable(gl.BLEND);
                 gl.disable(gl.DEPTH_TEST);

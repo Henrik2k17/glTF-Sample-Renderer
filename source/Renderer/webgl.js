@@ -66,6 +66,10 @@ class gltfWebGl {
                 return ext.rgtc?.COMPRESSED_RED_RGTC1_EXT;
             case "BC5":
                 return ext.rgtc?.COMPRESSED_RED_GREEN_RGTC2_EXT;
+            case "BC5_SNORM":
+                return ext.rgtc?.COMPRESSED_SIGNED_RED_GREEN_RGTC2_EXT;
+            case "BC4_SNORM":
+                return ext.rgtc?.COMPRESSED_SIGNED_RED_RGTC1_EXT;
             case "BC7":
                 return linear
                     ? ext.bptc?.COMPRESSED_RGBA_BPTC_UNORM_EXT
@@ -136,7 +140,7 @@ class gltfWebGl {
             (gltfTex.glTextureSRGB === undefined && !textureInfo.linear)
         ) {
             if (
-                image.mimeType === ImageMimeType.KTX2 ||
+                (image.mimeType === ImageMimeType.KTX2 && image.image.compressed === undefined) ||
                 image.mimeType === ImageMimeType.GLTEXTURE
             ) {
                 // these image resources are directly loaded to a GPU resource by resource loader
@@ -194,7 +198,8 @@ class gltfWebGl {
                     GL.UNSIGNED_BYTE,
                     image.image
                 );
-            } else if (isDecodedImageType(image.mimeType)) {
+            } else if (isDecodedImageType(image.mimeType) || image.image.compressed !== undefined) {
+                // DDS/TGA/TIFF, and KTX2 files holding plain block-compressed data (MSFS)
                 this.uploadDecodedImage(image, textureInfo, image.type);
             }
 

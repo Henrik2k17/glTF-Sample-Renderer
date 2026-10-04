@@ -229,16 +229,27 @@ class gltfMaterial extends GltfObject {
             this.defines.push("NORMAL_MAP_DIRECTX 1");
         }
 
-        // Two channel (BC5) normal maps only store X and Y.
-        const isTwoChannel = (textureInfo) => {
+        // Two channel (BC5) normal maps only store X and Y; signed (SNORM) ones are sampled
+        // as -1..1 already.
+        const compressedFormat = (textureInfo) => {
             const texture = gltf.textures[textureInfo?.index];
-            return gltf.images[texture?.source]?.image?.compressed?.format === "BC5";
+            return gltf.images[texture?.source]?.image?.compressed?.format;
         };
-        if (isTwoChannel(this.normalTexture)) {
+        const normalFormat = compressedFormat(this.normalTexture);
+        if (normalFormat === "BC5" || normalFormat === "BC5_SNORM") {
             this.defines.push("NORMAL_MAP_RECONSTRUCT_Z 1");
         }
-        if (isTwoChannel(this.extensions?.KHR_materials_clearcoat?.clearcoatNormalTexture)) {
+        if (normalFormat === "BC5_SNORM") {
+            this.defines.push("NORMAL_MAP_SNORM 1");
+        }
+        const clearcoatNormalFormat = compressedFormat(
+            this.extensions?.KHR_materials_clearcoat?.clearcoatNormalTexture
+        );
+        if (clearcoatNormalFormat === "BC5" || clearcoatNormalFormat === "BC5_SNORM") {
             this.defines.push("CLEARCOAT_NORMAL_MAP_RECONSTRUCT_Z 1");
+        }
+        if (clearcoatNormalFormat === "BC5_SNORM") {
+            this.defines.push("CLEARCOAT_NORMAL_MAP_SNORM 1");
         }
 
         if (this.normalTexture !== undefined) {
