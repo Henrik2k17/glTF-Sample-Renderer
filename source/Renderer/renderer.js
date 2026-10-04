@@ -2407,6 +2407,74 @@ class gltfRenderer {
             {
                 debugOutput: GltfState.DebugOutput.volumeScatter.SINGLE_SCATTER_COLOR,
                 shaderDefine: "DEBUG_VOLUME_SCATTER_SINGLE_SCATTER_COLOR"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_UV0_TILED,
+                shaderDefine: "DEBUG_MSFS_UV0_TILED"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_VERTEX_COLOR,
+                shaderDefine: "DEBUG_MSFS_VERTEX_COLOR"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_VERTEX_ALPHA,
+                shaderDefine: "DEBUG_MSFS_VERTEX_ALPHA"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_COLOR,
+                shaderDefine: "DEBUG_MSFS_DETAIL_COLOR"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_MASK,
+                shaderDefine: "DEBUG_MSFS_DETAIL_MASK"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_NORMAL,
+                shaderDefine: "DEBUG_MSFS_DETAIL_NORMAL"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_OCCLUSION,
+                shaderDefine: "DEBUG_MSFS_DETAIL_OCCLUSION"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_ROUGHNESS,
+                shaderDefine: "DEBUG_MSFS_DETAIL_ROUGHNESS"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_METALLIC,
+                shaderDefine: "DEBUG_MSFS_DETAIL_METALLIC"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_EXTRA_OCCLUSION,
+                shaderDefine: "DEBUG_MSFS_EXTRA_OCCLUSION"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DIRT,
+                shaderDefine: "DEBUG_MSFS_DIRT"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_TIRE,
+                shaderDefine: "DEBUG_MSFS_TIRE"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_PEARL,
+                shaderDefine: "DEBUG_MSFS_PEARL"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DECAL_WEIGHTS,
+                shaderDefine: "DEBUG_MSFS_DECAL_WEIGHTS"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DECAL_RELIGHT,
+                shaderDefine: "DEBUG_MSFS_DECAL_RELIGHT"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_PARALLAX,
+                shaderDefine: "DEBUG_MSFS_PARALLAX"
+            },
+            {
+                debugOutput: GltfState.DebugOutput.msfs.MSFS_DRAW_ORDER,
+                shaderDefine: "DEBUG_MSFS_DRAW_ORDER"
             }
         ];
 

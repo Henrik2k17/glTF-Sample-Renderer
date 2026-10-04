@@ -48,6 +48,8 @@ uniform sampler2D u_MsfsDetailNormalSampler;
 uniform int u_MsfsDetailNormalUVSet;
 uniform float u_MsfsDetailNormalScale;
 uniform sampler2D u_MsfsBlendMaskSampler;
+uniform sampler2D u_MsfsDetailCompSampler; // detailMetalRoughAOTexture: R occlusion, G roughness, B metallic
+uniform int u_MsfsDetailCompUVSet;
 uniform int u_MsfsBlendMaskUVSet;
 uniform float u_MsfsDetailUVScale;
 uniform float u_MsfsBlendThreshold;
@@ -65,6 +67,17 @@ uniform vec2 u_MsfsTireState; // mud, dust
 uniform vec3 u_MsfsDecalFactors; // color, normal, emissive blend factors
 uniform sampler2D u_MsfsRoomSampler;
 uniform vec4 u_MsfsParallax; // room size X, room size Y, depth (parallax scale), rooms per atlas row
+uniform int u_MsfsDrawOrder;
+
+// MSFS debug channels: the value of the selected channel, captured where it is computed.
+// Left unset (checkerboard) where the material does not use the feature.
+vec3 msfsDebugValue = vec3(0.0);
+bool msfsDebugSet = false;
+void setMsfsDebug(vec3 value)
+{
+    msfsDebugValue = value;
+    msfsDebugSet = true;
+}
 
 
 vec2 getNormalUV()

@@ -1,6 +1,7 @@
 import { mat3, vec2, vec3, vec4 } from "gl-matrix";
 import { GltfObject } from "./gltf_object.js";
 import { gltfTextureInfo } from "./texture.js";
+import { getMsfsDrawOrder } from "./msfs.js";
 
 // MSFS (ASOBO_*) material features that need their own shader paths. The maths follows Asobo's
 // 3ds Max viewport shaders (MSFS 2024 SDK, MSFS2024_Material/Fx: core.fx and
@@ -171,7 +172,9 @@ function initMsfsMaterial(material, gltf) {
         }
         msfs.detailUVScale = detail.UVScale ?? 1;
         msfs.blendThreshold = detail.blendThreshold ?? 0;
-        // detailMetalRoughAOTexture is not used by the 3ds Max viewport shader, so not here either.
+        // detailMetalRoughAOTexture is not used by the 3ds Max viewport shader, so not for shading
+        // either; it is loaded for the detail occlusion/roughness/metallic debug channels only.
+        msfs.detailComp = addTexture(material, gltf, detail.detailMetalRoughAOTexture, "u_MsfsDetailCompSampler", true, "MSFS_DETAIL_COMP_MAP 1");
     }
 
     // Surface effects, in the Max shader's order: pearlescent, dirt, tire.
@@ -274,6 +277,7 @@ function updateMsfsMaterialUniforms(shader, material) {
     if (msfs === undefined) {
         return;
     }
+    shader.updateUniform("u_MsfsDrawOrder", getMsfsDrawOrder(material), false);
     if (msfs.uvOptions !== undefined) {
         shader.updateUniform("u_MsfsUV0Transform", getMsfsUV0Transform(msfs.uvOptions), false);
     }
@@ -285,6 +289,7 @@ function updateMsfsMaterialUniforms(shader, material) {
     shader.updateUniform("u_MsfsDetailNormalUVSet", msfs.detailNormal?.texCoord, false);
     shader.updateUniform("u_MsfsDetailNormalScale", msfs.detailNormal?.scale, false);
     shader.updateUniform("u_MsfsBlendMaskUVSet", msfs.blendMask?.texCoord, false);
+    shader.updateUniform("u_MsfsDetailCompUVSet", msfs.detailComp?.texCoord, false);
     shader.updateUniform("u_MsfsExtraOcclusionUVSet", msfs.extraOcclusion?.texCoord, false);
     if (msfs.occlusionStrength !== undefined) {
         shader.updateUniform("u_OcclusionStrength", msfs.occlusionStrength, false);

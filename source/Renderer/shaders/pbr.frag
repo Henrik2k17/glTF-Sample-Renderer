@@ -317,7 +317,11 @@ void main()
 #endif
 #ifdef MSFS_EXTRA_OCCLUSION_MAP
     // ASOBO_extra_occlusion: a second occlusion map, usually on UV2
-    ao *= texture(u_MsfsExtraOcclusionSampler, getTexcoord(u_MsfsExtraOcclusionUVSet)).r;
+    float msfsExtraOcclusion = texture(u_MsfsExtraOcclusionSampler, getTexcoord(u_MsfsExtraOcclusionUVSet)).r;
+    ao *= msfsExtraOcclusion;
+#if DEBUG == DEBUG_MSFS_EXTRA_OCCLUSION
+    setMsfsDebug(vec3(msfsExtraOcclusion));
+#endif
 #endif
 #ifdef MSFS_OCCLUSION_STRENGTH
     // ASOBO_occlusion_strength: 0..1 fades the occlusion in, 1..2 darkens towards black
@@ -690,6 +694,56 @@ vec3 specularTexture = vec3(1.0);
 
     g_finalColor.rgb = vec3(direction, 0.0);
 #endif
+#endif
+
+    // MSFS:
+#if DEBUG == DEBUG_MSFS_UV0_TILED
+    g_finalColor.rgb = vec3(fract(v_texcoord_0), 0.0);
+#endif
+#if DEBUG == DEBUG_MSFS_DRAW_ORDER
+    {
+        // 0 = no draw order (grey); higher orders cycle through distinct hues
+        const vec3 palette[8] = vec3[8](vec3(0.9, 0.2, 0.2), vec3(0.95, 0.6, 0.1), vec3(0.9, 0.9, 0.2), vec3(0.3, 0.85, 0.3),
+            vec3(0.2, 0.8, 0.9), vec3(0.25, 0.4, 0.95), vec3(0.65, 0.3, 0.95), vec3(0.95, 0.4, 0.75));
+        vec3 orderColor = u_MsfsDrawOrder <= 0 ? vec3(0.45) : palette[(u_MsfsDrawOrder - 1) % 8];
+        g_finalColor.rgb = orderColor * (0.6 + 0.4 * clampedDot(n, v));
+    }
+#endif
+    // Decal channels composite: other surfaces are the neutral base (black / mid grey) and each
+    // decal blends over it by its coverage, so stacked decals all show.
+#if DEBUG == DEBUG_MSFS_DECAL_WEIGHTS
+#ifdef MSFS_DECAL_BLEND
+    {
+        vec2 weights = baseColor.a * u_MsfsDecalFactors.xy;
+        g_finalColor = vec4(weights, 0.0, max(weights.x, weights.y));
+    }
+#else
+    g_finalColor = vec4(0.0, 0.0, 0.0, 1.0);
+#endif
+#endif
+#if DEBUG == DEBUG_MSFS_DECAL_RELIGHT
+#ifdef MSFS_DECAL_BLEND
+    // 0.5 = unchanged, brighter/darker where the decal normal map relights the surface
+    g_finalColor = vec4(vec3(0.5 * (msfsLightSurface > 1e-4 ? msfsLightNormal / msfsLightSurface : 1.0)), baseColor.a * u_MsfsDecalFactors.y);
+#else
+    g_finalColor = vec4(vec3(0.5), 1.0);
+#endif
+#endif
+#ifdef MSFS_PARALLAX_WINDOW
+#if DEBUG == DEBUG_MSFS_PARALLAX
+    g_finalColor.rgb = vec3(fract(msfsRoomUV * u_MsfsParallax.w), msfsGlass);
+#endif
+#endif
+    if (msfsDebugSet)
+    {
+        g_finalColor.rgb = msfsDebugValue;
+    }
+#if defined(MSFS_DECAL_BLEND) && DEBUG >= DEBUG_MSFS_UV0_TILED && DEBUG <= DEBUG_MSFS_DRAW_ORDER && DEBUG != DEBUG_MSFS_DECAL_WEIGHTS && DEBUG != DEBUG_MSFS_DECAL_RELIGHT && DEBUG != DEBUG_MSFS_DRAW_ORDER && DEBUG != DEBUG_MSFS_UV0_TILED
+    // A decal without data for this MSFS channel must not hide the surface below it
+    if (!msfsDebugSet)
+    {
+        g_finalColor.a = 0.0;
+    }
 #endif
 
     // Diffuse Transmission:

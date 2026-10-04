@@ -302,6 +302,27 @@ GltfState.DebugOutput = {
         PRE_SCATTER_PASS: "Pre-Scatter Pass"
     },
 
+    /** MSFS (ASOBO_*) material features, see msfs_material.js */
+    msfs: {
+        MSFS_UV0_TILED: "MSFS UV0 (tiled)",
+        MSFS_VERTEX_COLOR: "MSFS Vertex Color",
+        MSFS_VERTEX_ALPHA: "MSFS Vertex Alpha",
+        MSFS_DETAIL_COLOR: "MSFS Detail Color",
+        MSFS_DETAIL_MASK: "MSFS Detail Mask / Blend",
+        MSFS_DETAIL_NORMAL: "MSFS Detail Normal",
+        MSFS_DETAIL_OCCLUSION: "MSFS Detail Occlusion",
+        MSFS_DETAIL_ROUGHNESS: "MSFS Detail Roughness",
+        MSFS_DETAIL_METALLIC: "MSFS Detail Metallic",
+        MSFS_EXTRA_OCCLUSION: "MSFS Extra Occlusion",
+        MSFS_DIRT: "MSFS Dirt Blend",
+        MSFS_TIRE: "MSFS Tire Mud (R) / Dust (G)",
+        MSFS_PEARL: "MSFS Pearlescent Ramp",
+        MSFS_DECAL_WEIGHTS: "MSFS Decal Color (R) / Normal (G) Weight",
+        MSFS_DECAL_RELIGHT: "MSFS Decal Relight",
+        MSFS_PARALLAX: "MSFS Parallax Room UV (RG) / Glass (B)",
+        MSFS_DRAW_ORDER: "MSFS Draw Order"
+    },
+
     gaussianSplatting: {
         /** output the spherical harmonics degree 0 */
         SH_DEGREE_0: "SH Degree 0",

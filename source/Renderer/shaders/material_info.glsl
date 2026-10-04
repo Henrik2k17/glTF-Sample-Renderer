@@ -169,13 +169,26 @@ vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha
     vec4 blendColor = u_BaseColorFactor;
 #ifdef MSFS_DETAIL_COLOR_MAP
     blendColor = sRGBToLinear(texture(u_MsfsDetailColorSampler, getMsfsDetailUV(u_MsfsDetailColorUVSet)));
+#if DEBUG == DEBUG_MSFS_DETAIL_COLOR
+    setMsfsDebug(linearTosRGB(blendColor.rgb));
 #endif
-    return mix(blendColor, albedo, getMsfsBlend(vertexAlpha));
+#endif
+    float blend = getMsfsBlend(vertexAlpha);
+#if DEBUG == DEBUG_MSFS_DETAIL_MASK
+    setMsfsDebug(vec3(1.0 - blend));
+#endif
+    return mix(blendColor, albedo, blend);
 #elif defined(MSFS_DETAIL_COLOR_MAP)
     // Overlay: 0.5 is neutral. The Max viewport works on gamma-space colors, so the factor is
     // applied there: linear albedo times factor^2.2, clamped like saturate().
     vec4 detail = texture(u_MsfsDetailColorSampler, getMsfsDetailUV(u_MsfsDetailColorUVSet));
     float mask = detail.a * vertexAlpha * baseTextureAlpha;
+#if DEBUG == DEBUG_MSFS_DETAIL_COLOR
+    setMsfsDebug(detail.rgb);
+#endif
+#if DEBUG == DEBUG_MSFS_DETAIL_MASK
+    setMsfsDebug(vec3(mask));
+#endif
     vec3 factor = mix(vec3(1.0), detail.rgb * 2.0, mask);
     albedo.rgb = min(albedo.rgb * pow(factor, vec3(GAMMA)), vec3(1.0));
     return albedo;
@@ -183,6 +196,23 @@ vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha
     return albedo;
 #endif
 }
+
+// Debug only: the detail comp texture is not part of the shading (as in the Max viewport).
+#ifdef MSFS_DETAIL_COMP_MAP
+void captureMsfsDetailCompDebug()
+{
+#if DEBUG == DEBUG_MSFS_DETAIL_OCCLUSION || DEBUG == DEBUG_MSFS_DETAIL_ROUGHNESS || DEBUG == DEBUG_MSFS_DETAIL_METALLIC
+    vec3 comp = texture(u_MsfsDetailCompSampler, getMsfsDetailUV(u_MsfsDetailCompUVSet)).rgb;
+#if DEBUG == DEBUG_MSFS_DETAIL_OCCLUSION
+    setMsfsDebug(vec3(comp.r));
+#elif DEBUG == DEBUG_MSFS_DETAIL_ROUGHNESS
+    setMsfsDebug(vec3(comp.g));
+#else
+    setMsfsDebug(vec3(comp.b));
+#endif
+#endif
+}
+#endif
 
 #ifdef MSFS_DETAIL_AFFECTS_NORMAL
 // Adds the detail normal to a tangent space normal (y already in glTF convention).
@@ -195,6 +225,9 @@ vec3 applyMsfsDetailNormal(vec3 n)
     detail.y = -detail.y;
 #endif
     detail *= u_MsfsDetailNormalScale;
+#if DEBUG == DEBUG_MSFS_DETAIL_NORMAL
+    setMsfsDebug(vec3(detail * 0.5 + 0.5, 1.0));
+#endif
 #endif
     float vertexAlpha = getVertexColor().a;
 #ifdef MSFS_BLEND_MASK
@@ -323,6 +356,9 @@ void applyMsfsSurfaceEffects(inout vec3 albedo, inout float roughness, inout flo
         yuv.x - 0.21482 * yuv.y - 0.38059 * yuv.z,
         yuv.x + 2.12798 * yuv.y);
     color = mix(color, clamp(pearl, 0.0, 1.0), metallic);
+#if DEBUG == DEBUG_MSFS_PEARL
+    setMsfsDebug(vec3(ramp));
+#endif
 #endif
 
 #ifdef MSFS_DIRT
@@ -333,6 +369,9 @@ void applyMsfsSurfaceEffects(inout vec3 albedo, inout float roughness, inout flo
     float dirtThreshold = 1.0 - u_MsfsDirt.y;
     float dirtBlend = msfsLinearstep(clamp(dirtRatio - dirtThreshold, 0.0, 1.0), clamp(dirtRatio + dirtThreshold, 0.0, 1.0), dirt.a) * u_MsfsDirt.z;
     color = mix(color, dirt.rgb, dirtBlend);
+#if DEBUG == DEBUG_MSFS_DIRT
+    setMsfsDebug(vec3(dirtBlend));
+#endif
 #ifdef MSFS_DIRT_ORM_MAP
     // The Max shader reads both from alpha (a float4 = .w slip); G and B as in any ORM map here.
     vec3 dirtORM = texture(u_MsfsDirtORMSampler, getTexcoord(u_MsfsDirtORMUVSet) * u_MsfsDirt.x).rgb;
@@ -346,6 +385,9 @@ void applyMsfsSurfaceEffects(inout vec3 albedo, inout float roughness, inout flo
     vec2 tireDetails = texture(u_MsfsTireDetailsSampler, getTexcoord(u_MsfsTireDetailsUVSet)).rg;
     float dust = tireDetails.y * u_MsfsTireState.y;
     float mud = step(max(tireDetails.x, 0.001), u_MsfsTireState.x);
+#if DEBUG == DEBUG_MSFS_TIRE
+    setMsfsDebug(vec3(mud, dust, 0.0));
+#endif
     color = mix(color, vec3(0.175, 0.130, 0.076), dust);
     color = mix(color, vec3(0.146, 0.093, 0.033), mud);
 #endif
@@ -473,9 +515,18 @@ vec4 getBaseColor()
 #endif
 
     vec4 vertexColor = getVertexColor();
+#if DEBUG == DEBUG_MSFS_VERTEX_COLOR && (defined(HAS_COLOR_0_VEC3) || defined(HAS_COLOR_0_VEC4))
+    setMsfsDebug(vertexColor.rgb);
+#endif
+#if DEBUG == DEBUG_MSFS_VERTEX_ALPHA && defined(HAS_COLOR_0_VEC4)
+    setMsfsDebug(vec3(vertexColor.a));
+#endif
 #ifdef MSFS_DETAIL_MAP
     // With a detail map, vertex alpha is the detail mask rather than opacity
     baseColor = applyMsfsDetailColor(baseColor, baseTexel.a, vertexColor.a);
+#ifdef MSFS_DETAIL_COMP_MAP
+    captureMsfsDetailCompDebug();
+#endif
     vertexColor.a = 1.0;
 #endif
     return baseColor * vertexColor;
