@@ -37,6 +37,8 @@ import {
 import { jsToGl } from "../gltf/utils.js";
 import { gltfMaterial } from "../gltf/material.js";
 
+const NoHighlightColor = vec4.fromValues(0, 0, 0, 0);
+
 class gltfRenderer {
     constructor(context) {
         this.shader = undefined; // current shader
@@ -1754,7 +1756,18 @@ class gltfRenderer {
         this.shader.updateUniform("u_Camera", this.currentCameraPosition, false);
         if (renderpassConfiguration.picking) {
             this.shader.updateUniform("u_PickingColor", node.pickingColor, false);
-        } 
+        } else {
+            // Uniforms persist per program, so reset the tint for every non-highlighted draw.
+            const highlighted = state.highlightedNodeIndices.has(node.gltfObjectIndex);
+            const params = state.renderingParameters;
+            this.shader.updateUniform(
+                "u_HighlightColor",
+                highlighted
+                    ? vec4.fromValues(...params.highlightColor, params.highlightStrength)
+                    : NoHighlightColor,
+                false
+            );
+        }
 
         this.updateAnimationUniforms(state, node, primitive);
 

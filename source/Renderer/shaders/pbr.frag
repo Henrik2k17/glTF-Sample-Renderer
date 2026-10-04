@@ -33,6 +33,14 @@ precision highp float;
 layout(location = 0) out vec4 g_finalColor;
 layout(location = 1) out uint toneMapFlag;
 
+// Inspector highlight: rgb = tint colour, a = blend amount (0 = off)
+uniform vec4 u_HighlightColor;
+
+vec3 applyHighlight(vec3 color)
+{
+    return mix(color, u_HighlightColor.rgb, u_HighlightColor.a);
+}
+
 
 void main()
 {
@@ -54,7 +62,7 @@ void main()
     g_finalColor = vec4(toneMapInverse(baseColor.rgb), baseColor.a);
     toneMapFlag = 2u;
 #else
-    g_finalColor = baseColor;
+    g_finalColor = vec4(applyHighlight(baseColor.rgb), baseColor.a);
     toneMapFlag = 1u;
 #endif
 // PBR Flow. This else goes all the way to the end of the file
@@ -465,7 +473,7 @@ void main()
 #endif
 
 
-    g_finalColor = vec4(color.rgb, baseColor.a);
+    g_finalColor = vec4(applyHighlight(color.rgb), baseColor.a);
     toneMapFlag = 2u;
 
 

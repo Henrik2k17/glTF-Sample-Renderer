@@ -62,6 +62,9 @@ class GltfState {
         /* Array of screen positions for hovering. Currently only one is supported. */
         this.hoverPositions = [{ x: undefined, y: undefined }];
 
+        /** Indices of nodes drawn with a highlight tint, e.g. the node selected in an inspector */
+        this.highlightedNodeIndices = new Set();
+
         /* the physics controller allows selecting and controlling different physics engines */
         this.physicsController = new PhysicsController();
         /** Indicates whether the view needs to be redrawn, currently used to indicate new sorting orders for gaussian splatting */
@@ -149,7 +152,11 @@ class GltfState {
             /** Render MSFS helper geometry (ASOBO_material_invisible), e.g. collision shells */
             showMsfsInvisibleMaterials: false,
             /** Use the MSFS night emissive multipliers (ASOBO_material_emissive) instead of the day ones */
-            msfsNightLighting: false
+            msfsNightLighting: false,
+            /** Linear RGB tint for highlightedNodeIndices */
+            highlightColor: [1.0, 0.45, 0.05],
+            /** How strongly the highlight tint replaces the shaded colour, 0 to 1 */
+            highlightStrength: 0.55
         };
 
         // retain a reference to the view with which the state was created, so that it can be validated

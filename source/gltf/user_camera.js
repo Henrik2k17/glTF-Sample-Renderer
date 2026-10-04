@@ -1,7 +1,7 @@
 import { vec3, mat4, quat } from "gl-matrix";
 import { gltfCamera } from "./camera.js";
 import { clamp } from "./utils.js";
-import { getSceneExtents } from "./gltf_utils.js";
+import { getSceneExtents, getNodeExtents } from "./gltf_utils.js";
 
 const PanSpeedDenominator = 3500;
 const MaxNearFarRatio = 10000;
@@ -260,6 +260,34 @@ class UserCamera extends gltfCamera {
         this.fitCameraTargetToExtents(this.sceneExtents.min, this.sceneExtents.max);
 
         this.fitPanSpeedToScene(this.sceneExtents.min, this.sceneExtents.max);
+        this.fitCameraPlanesToExtents(this.sceneExtents.min, this.sceneExtents.max);
+    }
+
+    /**
+     * Move the camera to frame a node and its descendants, keeping the current rotation.
+     * A node without geometry (e.g. a bone) is centred at the current distance instead.
+     * Clipping planes stay fitted to the whole scene.
+     * @param {Gltf} gltf
+     * @param {number} nodeIndex
+     */
+    focusOnNode(gltf, nodeIndex) {
+        const min = vec3.create();
+        const max = vec3.create();
+        getNodeExtents(gltf, nodeIndex, min, max);
+        const target = vec3.create();
+        if (min[0] === Number.POSITIVE_INFINITY) {
+            mat4.getTranslation(target, gltf.nodes[nodeIndex].getRenderedWorldTransform());
+        } else {
+            const yfov = this.perspective.yfov;
+            const fov = Math.min(yfov, yfov * (this.perspective.aspectRatio ?? 1));
+            // the extents are a cube around the bounding sphere, so half its edge is the radius
+            const radius = Math.max((max[0] - min[0]) / 2, 1e-4);
+            this.distance = (radius / Math.sin(fov / 2)) * 1.1;
+            vec3.add(target, min, max);
+            vec3.scale(target, target, 0.5);
+        }
+        this.setRotation(this.rotAroundY, this.rotAroundX);
+        this.setDistanceFromTarget(this.distance, target);
         this.fitCameraPlanesToExtents(this.sceneExtents.min, this.sceneExtents.max);
     }
 

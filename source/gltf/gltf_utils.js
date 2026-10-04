@@ -14,14 +14,27 @@ function getSceneExtents(gltf, sceneIndex, outMin, outMax) {
 }
 
 function computeSceneExtents(gltf, sceneIndex, outMin, outMax, skipMsfsInvisible) {
+    computeNodesExtents(gltf, gltf.scenes[sceneIndex].nodes, outMin, outMax, skipMsfsInvisible);
+}
+
+/**
+ * Bounds of a node and its descendants, skipping MSFS helper geometry unless it is all there is.
+ * Leaves outMin at +Infinity if the subtree has no geometry.
+ */
+function getNodeExtents(gltf, nodeIndex, outMin, outMax) {
+    computeNodesExtents(gltf, [nodeIndex], outMin, outMax, true);
+    if (outMin[0] === Number.POSITIVE_INFINITY) {
+        computeNodesExtents(gltf, [nodeIndex], outMin, outMax, false);
+    }
+}
+
+function computeNodesExtents(gltf, rootNodeIndices, outMin, outMax, skipMsfsInvisible) {
     for (const i of [0, 1, 2]) {
         outMin[i] = Number.POSITIVE_INFINITY;
         outMax[i] = Number.NEGATIVE_INFINITY;
     }
 
-    const scene = gltf.scenes[sceneIndex];
-
-    let nodeIndices = scene.nodes.slice();
+    let nodeIndices = rootNodeIndices.slice();
     while (nodeIndices.length > 0) {
         const node = gltf.nodes[nodeIndices.pop()];
         nodeIndices = nodeIndices.concat(node.children);
@@ -278,4 +291,10 @@ function recurseAllAnimatedProperties(gltfObject, callable, currentPath = "") {
     }
 }
 
-export { getSceneExtents, getAnimatedIndices, getMorphedNodeIndices, recurseAllAnimatedProperties };
+export {
+    getSceneExtents,
+    getNodeExtents,
+    getAnimatedIndices,
+    getMorphedNodeIndices,
+    recurseAllAnimatedProperties
+};
