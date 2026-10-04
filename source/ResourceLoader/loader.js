@@ -1,5 +1,17 @@
+import { generateTangentsInWorkers } from "../gltf/tangent_workers.js";
+
 class gltfLoader {
-    static async load(gltf, webGlContext, appendix = undefined, allowResourceAbsolutePath = true) {
+    /**
+     * @param {String} [tangentWorkerUrl] URL of tangent.worker.js; when set, missing tangents
+     * are generated in web workers instead of on the main thread during initGl.
+     */
+    static async load(
+        gltf,
+        webGlContext,
+        appendix = undefined,
+        allowResourceAbsolutePath = true,
+        tangentWorkerUrl = undefined
+    ) {
         const buffers = gltfLoader.getBuffers(appendix);
         const additionalFiles = gltfLoader.getAdditionalFiles(appendix);
 
@@ -16,8 +28,14 @@ class gltfLoader {
             additionalFiles,
             allowResourceAbsolutePath
         );
+        const tangentsPromise =
+            tangentWorkerUrl === undefined
+                ? Promise.resolve()
+                : generateTangentsInWorkers(gltf, tangentWorkerUrl).catch((error) =>
+                      console.warn("Tangent generation in workers failed:", error)
+                  );
 
-        return await Promise.all([buffersPromise, imagesPromise]).then(() =>
+        return await Promise.all([buffersPromise, imagesPromise, tangentsPromise]).then(() =>
             gltf.initGl(webGlContext)
         );
     }

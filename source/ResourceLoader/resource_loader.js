@@ -113,7 +113,13 @@ class ResourceLoader {
         gltf.fromJson(json);
 
         await init(`${this.libPath}mikktspace_bg.wasm`);
-        await gltfLoader.load(gltf, this.view.context, buffers, allowResourceAbsolutePath);
+        await gltfLoader.load(
+            gltf,
+            this.view.context,
+            buffers,
+            allowResourceAbsolutePath,
+            `${this.libPath}tangent.worker.js`
+        );
 
         return gltf;
     }
