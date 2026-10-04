@@ -2,6 +2,7 @@ import { GltfState } from "../GltfState/gltf_state.js";
 import { gltfRenderer } from "../Renderer/renderer.js";
 import { GL } from "../Renderer/webgl.js";
 import { ResourceLoader } from "../ResourceLoader/resource_loader.js";
+import { TextureReader } from "../Renderer/texture_reader.js";
 
 /**
  * GltfView represents a view on a gltf, e.g. in a canvas
@@ -48,6 +49,23 @@ class GltfView {
         resourceLoader.initKtxLib(externalKtxLib);
         resourceLoader.initDracoLib(externalDracoLib);
         return resourceLoader;
+    }
+
+    /**
+     * Reads a texture of the state's glTF back from the GPU as 8-bit RGBA, scaled down so its
+     * longer side is at most maxSize pixels. Values are as stored in the image (sRGB textures
+     * are not linearized). Row 0 is the first row of the image.
+     * @param {GltfState} state
+     * @param {number} textureIndex index into state.gltf.textures
+     * @param {number} [maxSize]
+     * @returns {{width, height, pixels: Uint8ClampedArray, sourceWidth, sourceHeight} | undefined}
+     */
+    readTexture(state, textureIndex, maxSize = 256) {
+        if (state.gltf === undefined) {
+            return undefined;
+        }
+        this.textureReader ??= new TextureReader(this.renderer.webGl);
+        return this.textureReader.read(state.gltf, textureIndex, maxSize);
     }
 
     /**

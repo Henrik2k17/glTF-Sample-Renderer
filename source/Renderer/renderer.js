@@ -40,6 +40,21 @@ import { buildMsfsHelperLines } from "../gltf/msfs_helpers.js";
 import { gltfMaterial } from "../gltf/material.js";
 
 const NoHighlightColor = vec4.fromValues(0, 0, 0, 0);
+// Picking ids hold the node's picking color in the low 24 bits (see drawPrimitive).
+const PickingNodeMask = 0xffffff;
+
+// Texel that makes a texture slot behave as if the texture was absent, for textures switched
+// off in a material debugger (textureInfo.debugDisabled). White suits factors that multiply.
+const NeutralTexels = {
+    u_NormalSampler: [128, 128, 255, 255],
+    u_ClearcoatNormalSampler: [128, 128, 255, 255],
+    u_MsfsDetailNormalSampler: [128, 128, 255, 255],
+    u_AnisotropySampler: [255, 128, 255, 255],
+    u_MsfsDetailColorSampler: [128, 128, 128, 255], // overlay neutral
+    u_MsfsDirtSampler: [0, 0, 0, 0], // no dirt
+    u_MsfsTireDetailsSampler: [255, 0, 0, 255] // no mud, no dust
+};
+const WhiteTexel = [255, 255, 255, 255];
 
 class gltfRenderer {
     constructor(context) {
@@ -709,6 +724,38 @@ class gltfRenderer {
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
+    /** Binds a 1x1 texture that stands in for a switched off texture, see NeutralTexels. */
+    bindNeutralTexture(location, samplerName, textureUnit) {
+        const gl = this.webGl.context;
+        const texel = NeutralTexels[samplerName] ?? WhiteTexel;
+        const key = texel.join(",");
+        this.neutralTextures ??= new Map();
+        let texture = this.neutralTextures.get(key);
+        if (texture === undefined) {
+            texture = gl.createTexture();
+            gl.bindTexture(GL.TEXTURE_2D, texture);
+            gl.texImage2D(GL.TEXTURE_2D, 0, GL.RGBA, 1, 1, 0, GL.RGBA, GL.UNSIGNED_BYTE, new Uint8Array(texel));
+            gl.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_MIN_FILTER, GL.NEAREST);
+            gl.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_MAG_FILTER, GL.NEAREST);
+            this.neutralTextures.set(key, texture);
+        }
+        gl.activeTexture(GL.TEXTURE0 + textureUnit);
+        gl.bindTexture(GL.TEXTURE_2D, texture);
+        gl.bindSampler(textureUnit, null);
+        gl.uniform1i(location, textureUnit);
+    }
+
+    /** MSFS helper geometry and, while materials are isolated, all other materials are hidden. */
+    isHiddenPrimitive(state, primitive) {
+        if (
+            state.isolatedMaterialIndices !== undefined &&
+            !state.isolatedMaterialIndices.has(primitive.material)
+        ) {
+            return true;
+        }
+        return isMsfsHiddenPrimitive(state.gltf, primitive, state.renderingParameters);
+    }
+
     prepareScene(state, scene) {
         const params = state.renderingParameters;
         const newNodes = scene.gatherNodes(state.gltf, state.renderingParameters.enabledExtensions);
@@ -723,7 +770,7 @@ class gltfRenderer {
                     ),
                 []
             )
-            .filter(({ primitive }) => !isMsfsHiddenPrimitive(state.gltf, primitive, params));
+            .filter(({ primitive }) => !this.isHiddenPrimitive(state, primitive));
         this.hoverDrawables = newNodes.hoverableNodes
             .filter((node) => node.mesh !== undefined)
             .reduce(
@@ -735,18 +782,20 @@ class gltfRenderer {
                     ),
                 []
             )
-            .filter(({ primitive }) => !isMsfsHiddenPrimitive(state.gltf, primitive, params));
+            .filter(({ primitive }) => !this.isHiddenPrimitive(state, primitive));
 
         // check if nodes have changed since previous frame to avoid unnecessary updates
         if (
             newNodes.nodes.length === this.nodes?.length &&
             newNodes.nodes.every((element, i) => element === this.nodes[i]) &&
-            params.showMsfsInvisibleMaterials === this.showMsfsInvisibleMaterials
+            params.showMsfsInvisibleMaterials === this.showMsfsInvisibleMaterials &&
+            state.isolatedMaterialIndices === this.isolatedMaterialIndices
         ) {
             return;
         }
         this.nodes = newNodes.nodes;
         this.showMsfsInvisibleMaterials = params.showMsfsInvisibleMaterials;
+        this.isolatedMaterialIndices = state.isolatedMaterialIndices;
 
         // collect drawables by essentially zipping primitives (for geometry and material)
         // and nodes for the transform
@@ -763,8 +812,7 @@ class gltfRenderer {
             )
             .filter(
                 ({ primitive }) =>
-                    primitive.material !== undefined &&
-                    !isMsfsHiddenPrimitive(state.gltf, primitive, params)
+                    primitive.material !== undefined && !this.isHiddenPrimitive(state, primitive)
             );
         this.drawables = drawables;
 
@@ -1381,9 +1429,10 @@ class gltfRenderer {
             // Search for node with matching picking ID
             let found = false;
             for (const node of state.gltf.nodes) {
-                if (node.pickingColor === pixels[0]) {
+                if (node.pickingColor === (pixels[0] & PickingNodeMask)) {
                     found = true;
                     pickingResult.node = node;
+                    pickingResult.primitiveIndex = pixels[0] >>> 24;
                     break;
                 }
             }
@@ -1468,7 +1517,7 @@ class gltfRenderer {
 
             // Search for node with matching picking ID
             for (const node of state.gltf.nodes) {
-                if (node.pickingColor === pixels[0]) {
+                if (node.pickingColor === (pixels[0] & PickingNodeMask)) {
                     pickingResult.node = node;
                     break;
                 }
@@ -1849,10 +1898,21 @@ class gltfRenderer {
         this.shader.updateUniform("u_Exposure", state.renderingParameters.exposure, false);
         this.shader.updateUniform("u_Camera", this.currentCameraPosition, false);
         if (renderpassConfiguration.picking) {
-            this.shader.updateUniform("u_PickingColor", node.pickingColor, false);
+            // Node picking id in the low 24 bits, primitive index within the mesh in the high 8.
+            const primitiveIndex = Math.min(
+                state.gltf.meshes[node.mesh]?.primitives.indexOf(primitive) ?? 0,
+                255
+            );
+            this.shader.updateUniform(
+                "u_PickingColor",
+                (node.pickingColor | (primitiveIndex << 24)) >>> 0,
+                false
+            );
         } else {
             // Uniforms persist per program, so reset the tint for every non-highlighted draw.
-            const highlighted = state.highlightedNodeIndices.has(node.gltfObjectIndex);
+            const highlighted =
+                state.highlightedNodeIndices.has(node.gltfObjectIndex) ||
+                state.highlightedMaterialIndices.has(primitive.material);
             const params = state.renderingParameters;
             this.shader.updateUniform(
                 "u_HighlightColor",
@@ -2058,6 +2118,11 @@ class gltfRenderer {
         {
             let info = material.textures[textureIndex];
             const location = this.shader.getUniformLocation(info.samplerName);
+            if (info.debugDisabled && !renderpassConfiguration.picking)
+            {
+                this.bindNeutralTexture(location, info.samplerName, textureIndex);
+                continue;
+            }
             if (!this.webGl.setTexture(location, state.gltf, info, textureIndex))
             {
                 continue;

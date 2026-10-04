@@ -43,6 +43,7 @@ class GltfState {
 
         /** callback for selection: (selectionInfo : {
          * node,
+         * primitiveIndex, (index of the picked primitive in the node's mesh)
          * position,
          * rayOrigin,
          * controller }) => {} */
@@ -64,6 +65,12 @@ class GltfState {
 
         /** Indices of nodes drawn with a highlight tint, e.g. the node selected in an inspector */
         this.highlightedNodeIndices = new Set();
+
+        /** Indices of materials whose primitives are drawn with the highlight tint, e.g. in a material debugger */
+        this.highlightedMaterialIndices = new Set();
+
+        /** If set, only primitives with one of these material indices are drawn and pickable */
+        this.isolatedMaterialIndices = undefined;
 
         /* the physics controller allows selecting and controlling different physics engines */
         this.physicsController = new PhysicsController();

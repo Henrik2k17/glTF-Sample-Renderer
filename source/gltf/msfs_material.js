@@ -120,6 +120,8 @@ function addTexture(material, gltf, json, samplerName, linear, define) {
     const textureInfo = new gltfTextureInfo(undefined, 0, linear);
     textureInfo.fromJson(json);
     textureInfo.samplerName = samplerName;
+    // Links the bound texture to its extension property, e.g. for a material debugger.
+    textureInfo.sourceJson = json;
     material.textures.push(textureInfo);
     material.defines.push(define);
     return textureInfo;

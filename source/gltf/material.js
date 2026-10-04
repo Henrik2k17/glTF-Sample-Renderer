@@ -42,6 +42,8 @@ class gltfMaterial extends GltfObject {
         this.textures = [];
         this.textureTransforms = [];
         this.defines = [];
+        /** Core texture slots removed by dropUnloadedTextures, e.g. { normalTexture: textureInfo } */
+        this.droppedTextures = {};
     }
 
     static createDefault() {
@@ -176,21 +178,25 @@ class gltfMaterial extends GltfObject {
             const image = gltf.images[texture?.source];
             return image === undefined || !image.isLoaded();
         };
-        if (isUnloaded(this.normalTexture)) {
-            this.normalTexture = undefined;
-        }
-        if (isUnloaded(this.occlusionTexture)) {
-            this.occlusionTexture = undefined;
-        }
-        if (isUnloaded(this.emissiveTexture)) {
-            this.emissiveTexture = undefined;
-        }
-        if (isUnloaded(this.pbrMetallicRoughness?.baseColorTexture)) {
-            this.pbrMetallicRoughness.baseColorTexture = undefined;
-        }
-        if (isUnloaded(this.pbrMetallicRoughness?.metallicRoughnessTexture)) {
-            this.pbrMetallicRoughness.metallicRoughnessTexture = undefined;
-        }
+        const drop = (owner, key, path) => {
+            if (isUnloaded(owner?.[key])) {
+                this.droppedTextures[path] = owner[key];
+                owner[key] = undefined;
+            }
+        };
+        drop(this, "normalTexture", "normalTexture");
+        drop(this, "occlusionTexture", "occlusionTexture");
+        drop(this, "emissiveTexture", "emissiveTexture");
+        drop(
+            this.pbrMetallicRoughness,
+            "baseColorTexture",
+            "pbrMetallicRoughness.baseColorTexture"
+        );
+        drop(
+            this.pbrMetallicRoughness,
+            "metallicRoughnessTexture",
+            "pbrMetallicRoughness.metallicRoughnessTexture"
+        );
     }
 
     parseTextureInfoExtensions(textureInfo, textureKey) {
