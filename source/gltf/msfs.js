@@ -181,13 +181,15 @@ const supportedPropertyAnimationTargets = [
     /^materials\/\d+\/emissiveFactor$/,
     /^materials\/\d+\/pbrMetallicRoughness\/(baseColorFactor|metallicFactor|roughnessFactor)$/,
     /^cameras\/\d+\/perspective\/yfov$/,
-    /^materials\/\d+\/extensions\/ASOBO_material_UV_options\/(UVOffsetU|UVOffsetV|UVTilingU|UVTilingV|UVRotation)$/
+    /^materials\/\d+\/extensions\/ASOBO_material_UV_options\/(UVOffsetU|UVOffsetV|UVTilingU|UVTilingV|UVRotation)$/,
+    /^materials\/\d+\/extensions\/ASOBO_material_dirt\/dirtBlendAmount$/,
+    /^materials\/\d+\/extensions\/ASOBO_material_tire\/(tireMudAnimState|tireDustAnimState)$/
 ];
 
 /**
  * Translates ASOBO_property_animation channels (material and camera property animations) into
  * KHR_animation_pointer channels. Targets of MSFS-only properties the renderer has no
- * equivalent for (e.g. wiper or dirt states) are skipped.
+ * equivalent for (e.g. the windshield wiper state) are skipped.
  * @param {object} json - The animation JSON.
  * @returns {object} The animation JSON with the translated channels appended.
  */

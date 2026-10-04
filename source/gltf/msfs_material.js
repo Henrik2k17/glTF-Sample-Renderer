@@ -1,4 +1,4 @@
-import { mat3 } from "gl-matrix";
+import { mat3, vec2, vec3 } from "gl-matrix";
 import { GltfObject } from "./gltf_object.js";
 import { gltfTextureInfo } from "./texture.js";
 
@@ -8,10 +8,31 @@ import { gltfTextureInfo } from "./texture.js";
 // Field names and defaults follow the exporter (FlightSimMaterialExporter.cs).
 
 /**
- * ASOBO_material_UV_options, animatable through ASOBO_property_animation. The exporter omits
- * floats that are 0, so a missing tiling really is a tiling of 0 (3ds Max defaults to 1).
+ * Base for MSFS material extensions with properties animatable through
+ * ASOBO_property_animation (KHR_animation_pointer needs AnimatableProperty objects).
+ * Subclasses set static animatedProperties and initial values in the constructor.
  */
-class ASOBO_material_UV_options extends GltfObject {
+class MsfsAnimatableExtension extends GltfObject {
+    fromJson(json) {
+        super.fromJson(json);
+        this.json = json;
+    }
+
+    // Plain values for display (e.g. an inspector), without the animation bookkeeping.
+    toJSON() {
+        const json = { ...this.json };
+        for (const key of this.constructor.animatedProperties) {
+            json[key] = this[key];
+        }
+        return json;
+    }
+}
+
+/**
+ * ASOBO_material_UV_options. The exporter omits floats that are 0, so a missing tiling really
+ * is a tiling of 0 (3ds Max defaults to 1).
+ */
+class ASOBO_material_UV_options extends MsfsAnimatableExtension {
     static animatedProperties = ["UVOffsetU", "UVOffsetV", "UVTilingU", "UVTilingV", "UVRotation"];
     constructor() {
         super();
@@ -24,14 +45,38 @@ class ASOBO_material_UV_options extends GltfObject {
         this.UVTilingV = 0;
         this.UVRotation = 0;
     }
+}
 
-    // Plain values for display (e.g. an inspector), without the animation bookkeeping.
-    toJSON() {
-        const json = {};
-        for (const key of ["clampUVX", "clampUVY", "clampUVZ", ...ASOBO_material_UV_options.animatedProperties]) {
-            json[key] = this[key];
+/** ASOBO_material_dirt; the amount is animatable (e.g. driven by a sim variable). */
+class ASOBO_material_dirt extends MsfsAnimatableExtension {
+    static animatedProperties = ["dirtBlendAmount"];
+    constructor() {
+        super();
+        this.dirtUvScale = 1;
+        this.dirtBlendSharpness = 0;
+        this.dirtBlendAmount = 0;
+    }
+}
+
+/** ASOBO_material_tire; mud and dust states are animatable. */
+class ASOBO_material_tire extends MsfsAnimatableExtension {
+    static animatedProperties = ["tireMudAnimState", "tireDustAnimState"];
+    constructor() {
+        super();
+        this.tireMudAnimState = 0;
+        this.tireDustAnimState = 0;
+    }
+}
+
+const AnimatableExtensions = { ASOBO_material_UV_options, ASOBO_material_dirt, ASOBO_material_tire };
+
+/** Replaces the plain JSON of the animatable MSFS extensions on a material with their objects. */
+function fromJsonMsfsMaterialExtensions(material, jsonExtensions) {
+    for (const [name, ExtensionClass] of Object.entries(AnimatableExtensions)) {
+        if (jsonExtensions[name] !== undefined) {
+            material.extensions[name] = new ExtensionClass();
+            material.extensions[name].fromJson(jsonExtensions[name]);
         }
-        return json;
     }
 }
 
@@ -129,6 +174,36 @@ function initMsfsMaterial(material, gltf) {
         // detailMetalRoughAOTexture is not used by the 3ds Max viewport shader, so not here either.
     }
 
+    // Surface effects, in the Max shader's order: pearlescent, dirt, tire.
+    const pearl = ext.ASOBO_material_pearlescent;
+    if (pearl !== undefined) {
+        msfs.pearl = vec3.fromValues(pearl.pearlShift ?? 0, pearl.pearlRange ?? 0, pearl.pearlBrightness ?? 0);
+        material.defines.push("MSFS_PEARLESCENT 1");
+    }
+
+    const dirt = ext.ASOBO_material_dirt;
+    if (dirt instanceof ASOBO_material_dirt) {
+        // Raw (gamma space) like the rest of the surface effect maths; see applyMsfsSurfaceEffects.
+        msfs.dirtColor = addTexture(material, gltf, dirt.dirtTexture, "u_MsfsDirtSampler", true, "MSFS_DIRT 1");
+        if (msfs.dirtColor !== undefined) {
+            msfs.dirt = dirt;
+            msfs.dirtORM = addTexture(material, gltf, dirt.dirtOcclusionRoughnessMetallicTexture, "u_MsfsDirtORMSampler", true, "MSFS_DIRT_ORM_MAP 1");
+        }
+    }
+
+    // tireMudCutoutTexture and tireMudNormalTexture are not used by the Max viewport shader.
+    const tire = ext.ASOBO_material_tire;
+    if (tire instanceof ASOBO_material_tire) {
+        msfs.tireDetails = addTexture(material, gltf, tire.tireDetailsTexture, "u_MsfsTireDetailsSampler", true, "MSFS_TIRE 1");
+        if (msfs.tireDetails !== undefined) {
+            msfs.tire = tire;
+        }
+    }
+
+    if (msfs.pearl !== undefined || msfs.dirt !== undefined || msfs.tire !== undefined) {
+        material.defines.push("MSFS_SURFACE_EFFECTS 1");
+    }
+
     msfs.extraOcclusion = addTexture(
         material,
         gltf,
@@ -184,10 +259,24 @@ function updateMsfsMaterialUniforms(shader, material) {
     if (msfs.occlusionStrength !== undefined) {
         shader.updateUniform("u_OcclusionStrength", msfs.occlusionStrength, false);
     }
+    if (msfs.pearl !== undefined) {
+        shader.updateUniform("u_MsfsPearl", msfs.pearl, false);
+    }
+    // Vectors as typed arrays: updateUniform treats plain arrays as uniform arrays.
+    if (msfs.dirt !== undefined) {
+        const dirt = msfs.dirt;
+        shader.updateUniform("u_MsfsDirt", vec3.fromValues(dirt.dirtUvScale, dirt.dirtBlendSharpness, dirt.dirtBlendAmount), false);
+        shader.updateUniform("u_MsfsDirtUVSet", msfs.dirtColor.texCoord, false);
+        shader.updateUniform("u_MsfsDirtORMUVSet", msfs.dirtORM?.texCoord, false);
+    }
+    if (msfs.tire !== undefined) {
+        shader.updateUniform("u_MsfsTireState", vec2.fromValues(msfs.tire.tireMudAnimState, msfs.tire.tireDustAnimState), false);
+        shader.updateUniform("u_MsfsTireDetailsUVSet", msfs.tireDetails.texCoord, false);
+    }
 }
 
 export {
-    ASOBO_material_UV_options,
+    fromJsonMsfsMaterialExtensions,
     getMsfsUV0Transform,
     getMsfsClampedTextures,
     initMsfsMaterial,

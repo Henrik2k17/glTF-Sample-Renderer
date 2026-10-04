@@ -121,6 +121,17 @@ struct MaterialInfo
 };
 
 
+// linearstep of the 3ds Max shaders; with lo == hi (a zero threshold) it is a hard step.
+float msfsLinearstep(float lo, float hi, float x)
+{
+    if (hi - lo < 1e-5)
+    {
+        return x > lo ? 1.0 : 0.0;
+    }
+    return clamp((x - lo) / (hi - lo), 0.0, 1.0);
+}
+
+
 // MSFS detail map (ASOBO_material_detail_map), after the 3ds Max viewport shader
 // MSFS2024Material_Standard.fx. See msfs_material.js.
 #ifdef MSFS_DETAIL_MAP
@@ -141,18 +152,12 @@ vec2 getMsfsDetailUV(int uvSet)
 }
 
 // 1 = base material, 0 = detail. Vertex alpha paints the blend; the mask texture and the
-// threshold shape the transition (linearstep in the Max shader, a hard step at threshold 0).
+// threshold shape the transition.
 float getMsfsBlend(float vertexAlpha)
 {
 #ifdef MSFS_BLEND_MASK
     float mask = texture(u_MsfsBlendMaskSampler, getTexcoord(u_MsfsBlendMaskUVSet)).r;
-    float lo = clamp(mask - u_MsfsBlendThreshold, 0.0, 1.0);
-    float hi = clamp(mask + u_MsfsBlendThreshold, 0.0, 1.0);
-    if (hi - lo < 1e-5)
-    {
-        return vertexAlpha > lo ? 1.0 : 0.0;
-    }
-    return clamp((vertexAlpha - lo) / (hi - lo), 0.0, 1.0);
+    return msfsLinearstep(clamp(mask - u_MsfsBlendThreshold, 0.0, 1.0), clamp(mask + u_MsfsBlendThreshold, 0.0, 1.0), vertexAlpha);
 #else
     return 1.0;
 #endif
@@ -204,6 +209,63 @@ vec3 applyMsfsDetailNormal(vec3 n)
 #endif
 
 #endif // MSFS_DETAIL_MAP
+
+
+// MSFS surface effects (ASOBO_material_pearlescent, _dirt, _tire), after the 3ds Max viewport
+// shader MSFS2024Material_Standard.fx and in its order. Like the Max viewport, the color maths
+// runs on gamma-space colors.
+#ifdef MSFS_SURFACE_EFFECTS
+void applyMsfsSurfaceEffects(inout vec3 albedo, inout float roughness, inout float metallic, vec3 n, vec3 v)
+{
+    vec3 color = linearTosRGB(albedo);
+
+#ifdef MSFS_PEARLESCENT
+    // Hue shift with the viewing angle, on metallic areas: rotate the YUV chroma.
+    float ramp = pow(max(1.0 - clamp(dot(n, v), 0.0, 1.0), 1e-6), u_MsfsPearl.x);
+    vec3 yuv = vec3(
+        dot(vec3(0.21260, 0.71520, 0.07220), color),
+        dot(vec3(-0.09991, -0.33609, 0.43600), color),
+        dot(vec3(0.61500, -0.55861, -0.05639), color));
+    float angle = -ramp * u_MsfsPearl.y * 6.2831853;
+    float c = cos(angle);
+    float s = sin(angle);
+    yuv.yz = vec2(dot(yuv.yz, vec2(c, s)), dot(yuv.yz, vec2(-s, c))) * 3.1415926;
+    yuv.x = clamp(yuv.x + clamp(ramp, 0.0, 1.0) * u_MsfsPearl.z, 0.0, 1.0);
+    vec3 pearl = vec3(
+        yuv.x + 1.28033 * yuv.z,
+        yuv.x - 0.21482 * yuv.y - 0.38059 * yuv.z,
+        yuv.x + 2.12798 * yuv.y);
+    color = mix(color, clamp(pearl, 0.0, 1.0), metallic);
+#endif
+
+#ifdef MSFS_DIRT
+    // The dirt texture's alpha is the dirt height: the amount raises the level, the sharpness
+    // narrows the transition.
+    vec4 dirt = texture(u_MsfsDirtSampler, getTexcoord(u_MsfsDirtUVSet) * u_MsfsDirt.x);
+    float dirtRatio = 1.0 - u_MsfsDirt.z;
+    float dirtThreshold = 1.0 - u_MsfsDirt.y;
+    float dirtBlend = msfsLinearstep(clamp(dirtRatio - dirtThreshold, 0.0, 1.0), clamp(dirtRatio + dirtThreshold, 0.0, 1.0), dirt.a) * u_MsfsDirt.z;
+    color = mix(color, dirt.rgb, dirtBlend);
+#ifdef MSFS_DIRT_ORM_MAP
+    // The Max shader reads both from alpha (a float4 = .w slip); G and B as in any ORM map here.
+    vec3 dirtORM = texture(u_MsfsDirtORMSampler, getTexcoord(u_MsfsDirtORMUVSet) * u_MsfsDirt.x).rgb;
+    roughness = mix(roughness, dirtORM.g, dirtBlend);
+    metallic = mix(metallic, dirtORM.b, dirtBlend);
+#endif
+#endif
+
+#ifdef MSFS_TIRE
+    // Details texture: R = mud level (shown below the mud state), G = dust mask.
+    vec2 tireDetails = texture(u_MsfsTireDetailsSampler, getTexcoord(u_MsfsTireDetailsUVSet)).rg;
+    float dust = tireDetails.y * u_MsfsTireState.y;
+    float mud = step(max(tireDetails.x, 0.001), u_MsfsTireState.x);
+    color = mix(color, vec3(0.175, 0.130, 0.076), dust);
+    color = mix(color, vec3(0.146, 0.093, 0.033), mud);
+#endif
+
+    albedo = sRGBToLinear(color);
+}
+#endif
 
 
 // Get normal, tangent and bitangent vectors.

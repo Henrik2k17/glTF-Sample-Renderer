@@ -53,6 +53,15 @@ uniform float u_MsfsDetailUVScale;
 uniform float u_MsfsBlendThreshold;
 uniform sampler2D u_MsfsExtraOcclusionSampler;
 uniform int u_MsfsExtraOcclusionUVSet;
+uniform vec3 u_MsfsPearl; // shift, range, brightness
+uniform sampler2D u_MsfsDirtSampler;
+uniform int u_MsfsDirtUVSet;
+uniform sampler2D u_MsfsDirtORMSampler;
+uniform int u_MsfsDirtORMUVSet;
+uniform vec3 u_MsfsDirt; // UV scale, blend sharpness, amount
+uniform sampler2D u_MsfsTireDetailsSampler;
+uniform int u_MsfsTireDetailsUVSet;
+uniform vec2 u_MsfsTireState; // mud, dust
 
 
 vec2 getNormalUV()

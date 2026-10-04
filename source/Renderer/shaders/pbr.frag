@@ -99,6 +99,11 @@ void main()
     materialInfo = getMetallicRoughnessInfo(materialInfo);
 #endif
 
+#ifdef MSFS_SURFACE_EFFECTS
+    applyMsfsSurfaceEffects(baseColor.rgb, materialInfo.perceptualRoughness, materialInfo.metallic, n, v);
+    materialInfo.baseColor = baseColor.rgb;
+#endif
+
 #ifdef MATERIAL_SHEEN
     materialInfo = getSheenInfo(materialInfo);
 #endif
