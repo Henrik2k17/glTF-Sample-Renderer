@@ -36,6 +36,7 @@ import {
 } from "../gltf/msfs.js";
 import { jsToGl } from "../gltf/utils.js";
 import { getMsfsClampedTextures, updateMsfsMaterialUniforms } from "../gltf/msfs_material.js";
+import { buildMsfsHelperLines } from "../gltf/msfs_helpers.js";
 import { gltfMaterial } from "../gltf/material.js";
 
 const NoHighlightColor = vec4.fromValues(0, 0, 0, 0);
@@ -644,6 +645,68 @@ class gltfRenderer {
         }
         gl.bindSampler(unit, sampler);
         this.msfsSamplerUnits.push(unit);
+    }
+
+    // MSFS collision gizmos, fade volumes and lights as wireframes (see msfs_helpers.js): faint
+    // where hidden behind geometry, solid where visible.
+    drawMsfsHelpers(state) {
+        const params = state.renderingParameters;
+        if (!params.showMsfsColliders && !params.showMsfsLights) {
+            return;
+        }
+        const extents = state.userCamera.sceneExtents;
+        const sceneSize = vec3.distance(extents.min, extents.max);
+        const groups = buildMsfsHelperLines(state.gltf, state.sceneIndex, {
+            colliders: params.showMsfsColliders,
+            lights: params.showMsfsLights,
+            size: Number.isFinite(sceneSize) && sceneSize > 0 ? Math.min(Math.max(sceneSize * 0.05, 0.25), 2) : 0.5
+        });
+        if (groups.length === 0) {
+            return;
+        }
+        const gl = this.webGl.context;
+        const fragmentHash = this.shaderCache.selectShader("simple.frag", []);
+        const vertexHash = this.shaderCache.selectShader("picking.vert", []);
+        this.shader = this.shaderCache.getShaderProgram(fragmentHash, vertexHash);
+        gl.useProgram(this.shader.program);
+        this.shader.updateUniform("u_ViewProjectionMatrix", this.viewProjectionMatrix);
+        this.shader.updateUniform("u_ModelMatrix", mat4.create());
+        const location = this.shader.getAttributeLocation("a_position");
+        if (location === null) {
+            return;
+        }
+        if (this.msfsHelperBuffer === undefined) {
+            this.msfsHelperBuffer = gl.createBuffer();
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.msfsHelperBuffer);
+        // Earlier passes can leave attribute arrays enabled without data for this draw.
+        for (let i = 0; i < gl.getParameter(GL.MAX_VERTEX_ATTRIBS); i++) {
+            if (gl.getVertexAttrib(i, GL.VERTEX_ATTRIB_ARRAY_ENABLED)) {
+                gl.disableVertexAttribArray(i);
+            }
+        }
+        gl.enableVertexAttribArray(location);
+        gl.enable(GL.BLEND);
+        gl.blendFuncSeparate(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA, GL.ONE, GL.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(false);
+        // simple.frag has no output for the integer tone map flag attachment, which WebGL
+        // rejects while that draw buffer is enabled; the flag of the surface below is kept.
+        gl.drawBuffers([GL.COLOR_ATTACHMENT0, GL.NONE]);
+        for (const [depthFunc, alpha] of [[GL.GREATER, 0.3], [GL.LEQUAL, 1.0]]) {
+            gl.depthFunc(depthFunc);
+            for (const { color, positions } of groups) {
+                this.shader.updateUniform("u_Color", vec4.fromValues(color[0], color[1], color[2], alpha));
+                gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STREAM_DRAW);
+                gl.vertexAttribPointer(location, 3, GL.FLOAT, false, 0, 0);
+                gl.drawArrays(GL.LINES, 0, positions.length / 3);
+            }
+        }
+        gl.drawBuffers([GL.COLOR_ATTACHMENT0, GL.COLOR_ATTACHMENT1]);
+        gl.depthFunc(GL.LEQUAL);
+        gl.depthMask(true);
+        gl.disable(GL.BLEND);
+        gl.disableVertexAttribArray(location);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
     prepareScene(state, scene) {
@@ -1266,6 +1329,8 @@ class gltfRenderer {
                 );
             }
         }
+
+        this.drawMsfsHelpers(state);
 
         // Handle selection
         if (state.triggerSelection) {

@@ -156,7 +156,11 @@ class GltfState {
             /** Linear RGB tint for highlightedNodeIndices */
             highlightColor: [1.0, 0.45, 0.05],
             /** How strongly the highlight tint replaces the shaded colour, 0 to 1 */
-            highlightStrength: 0.55
+            highlightStrength: 0.55,
+            /** Draw MSFS collision gizmos and fade volumes (ASOBO_gizmo_object, ASOBO_fade_object) as wireframes */
+            showMsfsColliders: true,
+            /** Draw MSFS lights and sky portals as wireframe cones */
+            showMsfsLights: true
         };
 
         // retain a reference to the view with which the state was created, so that it can be validated
