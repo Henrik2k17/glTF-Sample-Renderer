@@ -35,6 +35,7 @@ import {
     getMsfsEmissiveMultiplier
 } from "../gltf/msfs.js";
 import { jsToGl } from "../gltf/utils.js";
+import { getMsfsClampedTextures, updateMsfsMaterialUniforms } from "../gltf/msfs_material.js";
 import { gltfMaterial } from "../gltf/material.js";
 
 const NoHighlightColor = vec4.fromValues(0, 0, 0, 0);
@@ -55,6 +56,8 @@ class gltfRenderer {
         this.opaqueFramebuffer = 0;
         this.opaqueDepthTexture = 0;
         this.pickingIDTexture = 0;
+        this.msfsSamplers = new Map(); // ASOBO_material_UV_options clamp samplers by parameters
+        this.msfsSamplerUnits = []; // texture units with such a sampler bound for the current draw
         this.pickingPositionTexture = 0;
         this.pickingDepthTexture = 0;
         this.hoverIDTexture = 0;
@@ -616,6 +619,31 @@ class gltfRenderer {
         this.webGl.context.clearBufferuiv(GL.COLOR, 0, new Uint32Array([0, 0, 0, 0]));
         this.webGl.context.clearBufferfv(GL.DEPTH, 0, new Float32Array([1.0]));
         this.webGl.context.bindFramebuffer(this.webGl.context.FRAMEBUFFER, null);
+    }
+
+    // ASOBO_material_UV_options clamping: a sampler object overrides the texture's own wrap
+    // mode on one texture unit, so the shared texture is not changed for other materials.
+    bindMsfsClampSampler(gltf, textureInfo, clamp, unit) {
+        const gl = this.webGl.context;
+        const texture = gltf.textures[textureInfo.index];
+        const gltfSampler = gltf.samplers[texture?.sampler];
+        if (gltfSampler === undefined) {
+            return;
+        }
+        const wrapS = clamp.clampU ? GL.CLAMP_TO_EDGE : gltfSampler.wrapS;
+        const wrapT = clamp.clampV ? GL.CLAMP_TO_EDGE : gltfSampler.wrapT;
+        const key = [wrapS, wrapT, gltfSampler.minFilter, gltfSampler.magFilter].join(",");
+        let sampler = this.msfsSamplers.get(key);
+        if (sampler === undefined) {
+            sampler = gl.createSampler();
+            gl.samplerParameteri(sampler, GL.TEXTURE_WRAP_S, wrapS);
+            gl.samplerParameteri(sampler, GL.TEXTURE_WRAP_T, wrapT);
+            gl.samplerParameteri(sampler, GL.TEXTURE_MIN_FILTER, gltfSampler.minFilter);
+            gl.samplerParameteri(sampler, GL.TEXTURE_MAG_FILTER, gltfSampler.magFilter);
+            this.msfsSamplers.set(key, sampler);
+        }
+        gl.bindSampler(unit, sampler);
+        this.msfsSamplerUnits.push(unit);
     }
 
     prepareScene(state, scene) {
@@ -1675,6 +1703,7 @@ class gltfRenderer {
             state.renderingParameters.debugOutput
         );
         vertDefines = primitive.defines.concat(vertDefines);
+        vertDefines.push(...(material.msfsVertDefines ?? []));
         if (instanceOffset !== undefined) {
             vertDefines.push("USE_INSTANCING 1");
         }
@@ -1948,6 +1977,9 @@ class gltfRenderer {
 
         this.shader.updateUniform("u_MultiScatterColor", jsToGl(material.extensions?.KHR_materials_volume_scatter?.multiscatterColor));
     
+        updateMsfsMaterialUniforms(this.shader, material);
+
+        const msfsClamp = renderpassConfiguration.picking ? undefined : getMsfsClampedTextures(material);
         let textureIndex = 0;
         for (; textureIndex < material.textures.length; ++textureIndex)
         {
@@ -1956,6 +1988,10 @@ class gltfRenderer {
             if (!this.webGl.setTexture(location, state.gltf, info, textureIndex))
             {
                 continue;
+            }
+            if (msfsClamp?.textures.has(info))
+            {
+                this.bindMsfsClampSampler(state.gltf, info, msfsClamp, textureIndex);
             }
         }
 
@@ -2054,6 +2090,13 @@ class gltfRenderer {
         {
             this.webGl.context.disable(GL.POLYGON_OFFSET_FILL);
         }
+
+        // Sampler objects stay bound to their unit; release them for later draws.
+        for (const unit of this.msfsSamplerUnits)
+        {
+            this.webGl.context.bindSampler(unit, null);
+        }
+        this.msfsSamplerUnits.length = 0;
 
         for (const attribute of primitive.glAttributes)
         {

@@ -180,13 +180,14 @@ function getMsfsEmissiveMultiplier(material, renderingParameters) {
 const supportedPropertyAnimationTargets = [
     /^materials\/\d+\/emissiveFactor$/,
     /^materials\/\d+\/pbrMetallicRoughness\/(baseColorFactor|metallicFactor|roughnessFactor)$/,
-    /^cameras\/\d+\/perspective\/yfov$/
+    /^cameras\/\d+\/perspective\/yfov$/,
+    /^materials\/\d+\/extensions\/ASOBO_material_UV_options\/(UVOffsetU|UVOffsetV|UVTilingU|UVTilingV|UVRotation)$/
 ];
 
 /**
  * Translates ASOBO_property_animation channels (material and camera property animations) into
- * KHR_animation_pointer channels. Targets of MSFS-only properties (e.g. wiper or dirt states,
- * UV options) are skipped since the renderer has no equivalent.
+ * KHR_animation_pointer channels. Targets of MSFS-only properties the renderer has no
+ * equivalent for (e.g. wiper or dirt states) are skipped.
  * @param {object} json - The animation JSON.
  * @returns {object} The animation JSON with the translated channels appended.
  */

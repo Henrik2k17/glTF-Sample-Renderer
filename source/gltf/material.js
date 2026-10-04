@@ -3,6 +3,7 @@ import { gltfTextureInfo } from "./texture.js";
 import { jsToGl, initGlForMembers } from "./utils.js";
 import { GltfObject } from "./gltf_object.js";
 import { translateMsfsMaterialJson } from "./msfs.js";
+import { ASOBO_material_UV_options, initMsfsMaterial } from "./msfs_material.js";
 
 class gltfMaterial extends GltfObject {
     static animatedProperties = ["alphaCutoff", "emissiveFactor"];
@@ -558,6 +559,8 @@ class gltfMaterial extends GltfObject {
             }
         }
 
+        initMsfsMaterial(this, gltf);
+
         initGlForMembers(this, gltf, webGlContext);
     }
 
@@ -743,6 +746,13 @@ class gltfMaterial extends GltfObject {
             this.extensions.KHR_materials_anisotropy = new KHR_materials_anisotropy();
             this.extensions.KHR_materials_anisotropy.fromJson(
                 jsonExtensions.KHR_materials_anisotropy
+            );
+        }
+
+        if (jsonExtensions.ASOBO_material_UV_options !== undefined) {
+            this.extensions.ASOBO_material_UV_options = new ASOBO_material_UV_options();
+            this.extensions.ASOBO_material_UV_options.fromJson(
+                jsonExtensions.ASOBO_material_UV_options
             );
         }
 

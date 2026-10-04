@@ -55,6 +55,11 @@ in mat4 a_instance_model_matrix;
 uniform mat3 u_vertNormalUVTransform;
 #endif
 
+#ifdef MSFS_UV0_TRANSFORM
+// ASOBO_material_UV_options: tiling, offset and rotation of UV0 (see msfs_material.js)
+uniform mat3 u_MsfsUV0Transform;
+#endif
+
 vec4 getPosition()
 {
     vec4 pos = vec4(a_position, 1.0);
@@ -167,6 +172,10 @@ void main()
 #ifdef USE_MORPHING
     v_texcoord_0 += getTargetTexCoord0(gl_VertexID);
     v_texcoord_1 += getTargetTexCoord1(gl_VertexID);
+#endif
+
+#ifdef MSFS_UV0_TRANSFORM
+    v_texcoord_0 = (u_MsfsUV0Transform * vec3(v_texcoord_0, 1.0)).xy;
 #endif
 
 

@@ -121,6 +121,91 @@ struct MaterialInfo
 };
 
 
+// MSFS detail map (ASOBO_material_detail_map), after the 3ds Max viewport shader
+// MSFS2024Material_Standard.fx. See msfs_material.js.
+#ifdef MSFS_DETAIL_MAP
+
+// Base color texture alpha: with a detail map it is part of the detail mask, not opacity.
+float getMsfsBaseTextureAlpha()
+{
+#if defined(MATERIAL_METALLICROUGHNESS) && defined(HAS_BASE_COLOR_MAP)
+    return texture(u_BaseColorSampler, getBaseColorUV()).a;
+#else
+    return 1.0;
+#endif
+}
+
+vec2 getMsfsDetailUV(int uvSet)
+{
+    return getTexcoord(uvSet) * u_MsfsDetailUVScale;
+}
+
+// 1 = base material, 0 = detail. Vertex alpha paints the blend; the mask texture and the
+// threshold shape the transition (linearstep in the Max shader, a hard step at threshold 0).
+float getMsfsBlend(float vertexAlpha)
+{
+#ifdef MSFS_BLEND_MASK
+    float mask = texture(u_MsfsBlendMaskSampler, getTexcoord(u_MsfsBlendMaskUVSet)).r;
+    float lo = clamp(mask - u_MsfsBlendThreshold, 0.0, 1.0);
+    float hi = clamp(mask + u_MsfsBlendThreshold, 0.0, 1.0);
+    if (hi - lo < 1e-5)
+    {
+        return vertexAlpha > lo ? 1.0 : 0.0;
+    }
+    return clamp((vertexAlpha - lo) / (hi - lo), 0.0, 1.0);
+#else
+    return 1.0;
+#endif
+}
+
+vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha)
+{
+#ifdef MSFS_BLEND_MASK
+    vec4 blendColor = u_BaseColorFactor;
+#ifdef MSFS_DETAIL_COLOR_MAP
+    blendColor = sRGBToLinear(texture(u_MsfsDetailColorSampler, getMsfsDetailUV(u_MsfsDetailColorUVSet)));
+#endif
+    return mix(blendColor, albedo, getMsfsBlend(vertexAlpha));
+#elif defined(MSFS_DETAIL_COLOR_MAP)
+    // Overlay: 0.5 is neutral. The Max viewport works on gamma-space colors, so the factor is
+    // applied there: linear albedo times factor^2.2, clamped like saturate().
+    vec4 detail = texture(u_MsfsDetailColorSampler, getMsfsDetailUV(u_MsfsDetailColorUVSet));
+    float mask = detail.a * vertexAlpha * baseTextureAlpha;
+    vec3 factor = mix(vec3(1.0), detail.rgb * 2.0, mask);
+    albedo.rgb = min(albedo.rgb * pow(factor, vec3(GAMMA)), vec3(1.0));
+    return albedo;
+#else
+    return albedo;
+#endif
+}
+
+#ifdef MSFS_DETAIL_AFFECTS_NORMAL
+// Adds the detail normal to a tangent space normal (y already in glTF convention).
+vec3 applyMsfsDetailNormal(vec3 n)
+{
+    vec2 detail = vec2(0.0);
+#ifdef MSFS_DETAIL_NORMAL_MAP
+    detail = texture(u_MsfsDetailNormalSampler, getMsfsDetailUV(u_MsfsDetailNormalUVSet)).rg * 2.0 - vec2(1.0);
+#ifdef NORMAL_MAP_DIRECTX
+    detail.y = -detail.y;
+#endif
+    detail *= u_MsfsDetailNormalScale;
+#endif
+    float vertexAlpha = getVertexColor().a;
+#ifdef MSFS_BLEND_MASK
+    n.xy = mix(n.xy, detail, 1.0 - getMsfsBlend(vertexAlpha));
+#else
+    n.xy += detail * vertexAlpha * getMsfsBaseTextureAlpha();
+#endif
+    // The Max shader rebuilds z from xy after adding the detail
+    n.z = sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+    return n;
+}
+#endif
+
+#endif // MSFS_DETAIL_MAP
+
+
 // Get normal, tangent and bitangent vectors.
 NormalInfo getNormalInfo(vec3 v)
 {
@@ -174,6 +259,8 @@ NormalInfo getNormalInfo(vec3 v)
     // Compute normals:
     NormalInfo info;
     info.ng = ng;
+#if defined(HAS_NORMAL_MAP) || defined(MSFS_DETAIL_AFFECTS_NORMAL)
+    info.ntex = vec3(0.0, 0.0, 1.0);
 #ifdef HAS_NORMAL_MAP
     info.ntex = texture(u_NormalSampler, UV).rgb * 2.0 - vec3(1.0);
 #ifdef NORMAL_MAP_DIRECTX
@@ -182,7 +269,13 @@ NormalInfo getNormalInfo(vec3 v)
 #ifdef NORMAL_MAP_RECONSTRUCT_Z
     info.ntex.z = sqrt(max(0.0, 1.0 - dot(info.ntex.xy, info.ntex.xy)));
 #endif
+#endif
+#ifdef MSFS_DETAIL_AFFECTS_NORMAL
+    info.ntex = applyMsfsDetailNormal(info.ntex);
+#endif
+#ifdef HAS_NORMAL_MAP
     info.ntex *= vec3(u_NormalScale, u_NormalScale, 1.0);
+#endif
     info.ntex = normalize(info.ntex);
     info.n = normalize(mat3(t, b, ng) * info.ntex);
 #else
@@ -223,12 +316,20 @@ vec3 getClearcoatNormal(NormalInfo normalInfo)
 vec4 getBaseColor()
 {
     vec4 baseColor = u_BaseColorFactor;
+    vec4 baseTexel = vec4(1.0);
 
 #if defined(HAS_BASE_COLOR_MAP)
-    baseColor *= texture(u_BaseColorSampler, getBaseColorUV());
+    baseTexel = texture(u_BaseColorSampler, getBaseColorUV());
+    baseColor *= baseTexel;
 #endif
 
-    return baseColor * getVertexColor();
+    vec4 vertexColor = getVertexColor();
+#ifdef MSFS_DETAIL_MAP
+    // With a detail map, vertex alpha is the detail mask rather than opacity
+    baseColor = applyMsfsDetailColor(baseColor, baseTexel.a, vertexColor.a);
+    vertexColor.a = 1.0;
+#endif
+    return baseColor * vertexColor;
 }
 
 

@@ -34,6 +34,27 @@ in vec2 v_texcoord_0;
 in vec2 v_texcoord_1;
 
 
+vec2 getTexcoord(int set)
+{
+    return set < 1 ? v_texcoord_0 : v_texcoord_1;
+}
+
+
+// MSFS material textures (see msfs_material.js)
+
+uniform sampler2D u_MsfsDetailColorSampler;
+uniform int u_MsfsDetailColorUVSet;
+uniform sampler2D u_MsfsDetailNormalSampler;
+uniform int u_MsfsDetailNormalUVSet;
+uniform float u_MsfsDetailNormalScale;
+uniform sampler2D u_MsfsBlendMaskSampler;
+uniform int u_MsfsBlendMaskUVSet;
+uniform float u_MsfsDetailUVScale;
+uniform float u_MsfsBlendThreshold;
+uniform sampler2D u_MsfsExtraOcclusionSampler;
+uniform int u_MsfsExtraOcclusionUVSet;
+
+
 vec2 getNormalUV()
 {
     vec3 uv = vec3(u_NormalUVSet < 1 ? v_texcoord_0 : v_texcoord_1, 1.0);

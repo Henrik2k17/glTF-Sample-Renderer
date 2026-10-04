@@ -281,10 +281,22 @@ void main()
     color = f_sheen + color * albedoSheenScaling;
     color = mix(color, clearcoat_brdf, clearcoatFactor * clearcoatFresnel);
 
-#ifdef HAS_OCCLUSION_MAP
+#if defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP)
     float ao = 1.0;
+#ifdef HAS_OCCLUSION_MAP
     ao = texture(u_OcclusionSampler,  getOcclusionUV()).r;
+#endif
+#ifdef MSFS_EXTRA_OCCLUSION_MAP
+    // ASOBO_extra_occlusion: a second occlusion map, usually on UV2
+    ao *= texture(u_MsfsExtraOcclusionSampler, getTexcoord(u_MsfsExtraOcclusionUVSet)).r;
+#endif
+#ifdef MSFS_OCCLUSION_STRENGTH
+    // ASOBO_occlusion_strength: 0..1 fades the occlusion in, 1..2 darkens towards black
+    ao = mix(mix(1.0, ao, clamp(u_OcclusionStrength, 0.0, 1.0)), 0.0, clamp(u_OcclusionStrength - 1.0, 0.0, 1.0));
+    color = color * ao;
+#else
     color = color * (1.0 + u_OcclusionStrength * (ao - 1.0)); 
+#endif
 #endif
 
 #endif //end USE_IBL
@@ -521,7 +533,7 @@ void main()
 #if DEBUG == DEBUG_ALPHA
     g_finalColor.rgb = vec3(baseColor.a);
 #endif
-#if DEBUG == DEBUG_OCCLUSION && defined(HAS_OCCLUSION_MAP)
+#if DEBUG == DEBUG_OCCLUSION && (defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP))
     g_finalColor.rgb = vec3(ao);
 #endif
 #if DEBUG == DEBUG_EMISSIVE
