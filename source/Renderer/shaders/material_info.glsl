@@ -211,6 +211,93 @@ vec3 applyMsfsDetailNormal(vec3 n)
 #endif // MSFS_DETAIL_MAP
 
 
+// MSFS parallax window (ASOBO_material_parallax_window): rooms behind the glass, ported from
+// computeTangentialInteriorParallax in the 3ds Max shader MSFS2024Material_ParallaxWindow.fx.
+// The room grid lies on UV2; a ray from the eye is intersected with the floor, ceiling, walls
+// and back wall of its room and the hit is mapped into the room atlas. Each room picks a random
+// atlas cell.
+#ifdef MSFS_PARALLAX_WINDOW
+float msfsRandom(vec2 p)
+{
+    p += vec2(0.0, 12545.54);
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * (p.x + p.y));
+}
+
+vec2 getMsfsParallaxRoomUV(vec3 v, NormalInfo normalInfo)
+{
+#ifdef HAS_TEXCOORD_1_VEC2
+    vec2 uv = v_texcoord_1;
+#else
+    vec2 uv = v_texcoord_0;
+#endif
+    vec3 roomSize = u_MsfsParallax.xyz;
+    float cellCount = u_MsfsParallax.w;
+    // Eye direction in UV space. The bitangent points up the image (-V), so flip it as Max does.
+    vec3 eye = vec3(dot(v, normalInfo.t), -dot(v, normalInfo.b), dot(v, normalInfo.ng)) / roomSize;
+    vec3 cell = fract(vec3(uv, 0.0) / roomSize);
+
+    vec2 cellIndex = floor(uv / roomSize.xy);
+    float random = msfsRandom(vec2(cellIndex.x, cellIndex.y));
+    float offsetX = floor(random * cellCount);
+    float offsetY = floor(mod(floor(random * 37.0), 3.0));
+
+    vec4 hit = vec4(1.0, 1.0, 1.0, 100000.0); // atlas uv, -, distance
+
+    // Floor
+    float groundVisible = step(0.0, eye.y);
+    float dist = cell.y / eye.y;
+    vec3 p = cell - dist * eye;
+    p.z /= roomSize.z;
+#ifdef MSFS_PARALLAX_CORRIDOR
+    float x = p.x;
+#else
+    float x = mix(p.x * 0.5 + 0.25, p.x, fract(p.z));
+#endif
+    hit = mix(hit, vec4(x, -p.z * 0.25, 0.0, dist), step(dist, hit.w) * groundVisible);
+
+    // Ceiling
+    dist = -(1.0 - cell.y) / eye.y;
+    p = cell - dist * eye;
+    p.z /= roomSize.z;
+#ifdef MSFS_PARALLAX_CORRIDOR
+    x = p.x;
+#else
+    x = mix(p.x * 0.5 + 0.25, p.x, fract(p.z));
+#endif
+    hit = mix(hit, vec4(x, p.z * 0.25 + 1.0, 0.0, dist), step(dist, hit.w) * (1.0 - groundVisible));
+
+#ifndef MSFS_PARALLAX_CORRIDOR
+    // Left wall
+    float leftVisible = step(0.0, eye.x);
+    dist = cell.x / eye.x;
+    p = cell - dist * eye;
+    p.z /= roomSize.z;
+    hit = mix(hit, vec4(p.z * -0.25, mix(p.y * 0.5 + 0.25, p.y, fract(p.z)), 0.0, dist), step(dist, hit.w) * leftVisible);
+
+    // Right wall
+    dist = -(1.0 - cell.x) / eye.x;
+    p = cell - dist * eye;
+    p.z /= roomSize.z;
+    hit = mix(hit, vec4(p.z * 0.25 + 1.0, mix(p.y * 0.5 + 0.25, p.y, fract(p.z)), 0.0, dist), step(dist, hit.w) * (1.0 - leftVisible));
+#endif
+
+    // Back wall
+    dist = roomSize.z / eye.z;
+    p = cell - dist * eye;
+#ifdef MSFS_PARALLAX_CORRIDOR
+    x = p.x;
+#else
+    x = p.x * 0.5 + 0.25;
+#endif
+    hit = mix(hit, vec4(x, p.y * 0.5 + 0.25, 0.0, dist), step(dist, hit.w));
+
+    return (hit.xy + vec2(offsetX, offsetY)) / cellCount + 1.0 / cellCount;
+}
+#endif
+
+
 // MSFS surface effects (ASOBO_material_pearlescent, _dirt, _tire), after the 3ds Max viewport
 // shader MSFS2024Material_Standard.fx and in its order. Like the Max viewport, the color maths
 // runs on gamma-space colors.

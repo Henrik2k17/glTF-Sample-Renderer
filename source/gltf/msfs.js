@@ -90,6 +90,9 @@ function withTiling(textureInfo, tiling) {
  * - ASOBO_material_emissive -> KHR_materials_emissive_strength, so the day/night multipliers can
  *   be applied as emissive strength (see getMsfsEmissiveMultiplier).
  * - ASOBO_material_alphamode_dither -> BLEND, approximating dithered transparency.
+ * - ASOBO_material_iridescent -> KHR_materials_iridescence (thin film; the 3ds Max viewport shader
+ *   has no iridescence to follow). Brightness becomes the iridescence factor, clamped to 1; the
+ *   thickness texture is read from its green channel, as KHR does.
  * @param {object} json - The material JSON.
  * @returns {{json: object, defines: string[]}}
  */
@@ -148,6 +151,20 @@ function translateMsfsMaterialJson(json) {
             (emissive.emissiveNightMultiplier ?? 1) !== 1)
     ) {
         out.extensions.KHR_materials_emissive_strength = { emissiveStrength: 1 };
+    }
+
+    const iridescent = ext.ASOBO_material_iridescent;
+    if (iridescent !== undefined && ext.KHR_materials_iridescence === undefined) {
+        const khr = {
+            iridescenceFactor: Math.min(1, iridescent.iridescentBrightness ?? 1),
+            // exporter defaults
+            iridescenceThicknessMinimum: iridescent.iridescentMinThickness ?? 10,
+            iridescenceThicknessMaximum: iridescent.iridescentMaxThickness ?? 400
+        };
+        if (iridescent.iridescentThicknessTexture !== undefined) {
+            khr.iridescenceThicknessTexture = { ...iridescent.iridescentThicknessTexture };
+        }
+        out.extensions.KHR_materials_iridescence = khr;
     }
 
     if (

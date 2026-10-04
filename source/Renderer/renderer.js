@@ -1821,7 +1821,15 @@ class gltfRenderer {
         if (material.alphaMode === 'BLEND' && !renderpassConfiguration.picking)
         {
             this.webGl.context.enable(GL.BLEND);
-            this.webGl.context.blendFuncSeparate(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA, GL.ONE, GL.ONE_MINUS_SRC_ALPHA);
+            if (material.msfs?.decalFactors !== undefined && state.renderingParameters.debugOutput === GltfState.DebugOutput.NONE)
+            {
+                // MSFS geometry decal: premultiplied color plus a relighting factor in alpha
+                this.webGl.context.blendFuncSeparate(GL.ONE, GL.SRC_ALPHA, GL.ZERO, GL.ONE);
+            }
+            else
+            {
+                this.webGl.context.blendFuncSeparate(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA, GL.ONE, GL.ONE_MINUS_SRC_ALPHA);
+            }
             this.webGl.context.blendEquation(GL.FUNC_ADD);
             this.webGl.context.depthMask(false);
         }

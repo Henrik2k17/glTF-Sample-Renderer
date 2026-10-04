@@ -62,6 +62,9 @@ uniform vec3 u_MsfsDirt; // UV scale, blend sharpness, amount
 uniform sampler2D u_MsfsTireDetailsSampler;
 uniform int u_MsfsTireDetailsUVSet;
 uniform vec2 u_MsfsTireState; // mud, dust
+uniform vec3 u_MsfsDecalFactors; // color, normal, emissive blend factors
+uniform sampler2D u_MsfsRoomSampler;
+uniform vec4 u_MsfsParallax; // room size X, room size Y, depth (parallax scale), rooms per atlas row
 
 
 vec2 getNormalUV()

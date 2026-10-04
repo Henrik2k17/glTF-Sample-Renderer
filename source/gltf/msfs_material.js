@@ -1,4 +1,4 @@
-import { mat3, vec2, vec3 } from "gl-matrix";
+import { mat3, vec2, vec3, vec4 } from "gl-matrix";
 import { GltfObject } from "./gltf_object.js";
 import { gltfTextureInfo } from "./texture.js";
 
@@ -204,6 +204,36 @@ function initMsfsMaterial(material, gltf) {
         material.defines.push("MSFS_SURFACE_EFFECTS 1");
     }
 
+    // Parallax window; the room atlas is a color texture (the Max shader decodes it to linear).
+    const parallax = ext.ASOBO_material_parallax_window;
+    if (parallax !== undefined) {
+        msfs.room = addTexture(material, gltf, parallax.behindWindowMapTexture, "u_MsfsRoomSampler", false, "MSFS_PARALLAX_WINDOW 1");
+        if (msfs.room !== undefined) {
+            // exporter defaults
+            msfs.parallax = vec4.fromValues(
+                parallax.roomSizeXScale ?? 0.5,
+                parallax.roomSizeYScale ?? 0.5,
+                parallax.parallaxScale ?? 0,
+                Math.max(1, parallax.roomNumberXY ?? 5)
+            );
+            if (parallax.corridor === true) {
+                material.defines.push("MSFS_PARALLAX_CORRIDOR 1");
+            }
+        }
+    }
+
+    // Geometry decal blend factors (exporter default 1), see the end of pbr.frag. Metallic,
+    // roughness and occlusion factors have no forward-rendering equivalent and are ignored.
+    const decal = ext.ASOBO_material_geometry_decal;
+    if (decal !== undefined && material.alphaMode === "BLEND") {
+        msfs.decalFactors = vec3.fromValues(
+            decal.baseColorBlendFactor ?? 1,
+            decal.normalBlendFactor ?? 1,
+            decal.emissiveBlendFactor ?? 1
+        );
+        material.defines.push("MSFS_DECAL_BLEND 1");
+    }
+
     msfs.extraOcclusion = addTexture(
         material,
         gltf,
@@ -258,6 +288,12 @@ function updateMsfsMaterialUniforms(shader, material) {
     shader.updateUniform("u_MsfsExtraOcclusionUVSet", msfs.extraOcclusion?.texCoord, false);
     if (msfs.occlusionStrength !== undefined) {
         shader.updateUniform("u_OcclusionStrength", msfs.occlusionStrength, false);
+    }
+    if (msfs.parallax !== undefined) {
+        shader.updateUniform("u_MsfsParallax", msfs.parallax, false);
+    }
+    if (msfs.decalFactors !== undefined) {
+        shader.updateUniform("u_MsfsDecalFactors", msfs.decalFactors, false);
     }
     if (msfs.pearl !== undefined) {
         shader.updateUniform("u_MsfsPearl", msfs.pearl, false);

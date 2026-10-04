@@ -45,6 +45,10 @@ vec3 applyHighlight(vec3 color)
 void main()
 {
     vec4 baseColor = getBaseColor();
+#ifdef MSFS_PARALLAX_WINDOW
+    // Base color alpha is the glass: 1 shows the facade, 0 the room behind it
+    float msfsGlass = baseColor.a;
+#endif
 
 #if ALPHAMODE == ALPHAMODE_OPAQUE
     baseColor.a = 1.0;
@@ -74,6 +78,22 @@ void main()
     vec3 n = normalInfo.n;
     vec3 t = normalInfo.t;
     vec3 b = normalInfo.b;
+
+#ifdef MSFS_DECAL_BLEND
+    // Diffuse light on the decal's normal and on the flat surface normal; their ratio relights
+    // the surface under the decal (see the end of main).
+    float msfsLightNormal = 0.0;
+    float msfsLightSurface = 0.0;
+#endif
+
+#ifdef MSFS_PARALLAX_WINDOW
+    vec2 msfsRoomUV = getMsfsParallaxRoomUV(v, normalInfo);
+    vec3 msfsRoom = texture(u_MsfsRoomSampler, msfsRoomUV).rgb * u_BaseColorFactor.rgb;
+    baseColor.rgb = mix(msfsRoom, baseColor.rgb, msfsGlass);
+#if ALPHAMODE != ALPHAMODE_MASK
+    baseColor.a = 1.0; // the window is opaque, the room fills it
+#endif
+#endif
 
     float NdotV = clampedDot(n, v);
     float TdotV = clampedDot(t, v);
@@ -206,6 +226,10 @@ void main()
 #if defined(USE_IBL) || defined(MATERIAL_TRANSMISSION)
 
     f_diffuse = getDiffuseLight(n) * baseColor.rgb ;
+#ifdef MSFS_DECAL_BLEND
+    msfsLightNormal += dot(getDiffuseLight(n), vec3(0.2126, 0.7152, 0.0722));
+    msfsLightSurface += dot(getDiffuseLight(normalInfo.ng), vec3(0.2126, 0.7152, 0.0722));
+#endif
 
 #ifdef MATERIAL_DIFFUSE_TRANSMISSION
     diffuseTransmissionIBL = getDiffuseLight(-n) * materialInfo.diffuseTransmissionColorFactor;
@@ -342,6 +366,11 @@ void main()
         vec3 lightIntensity = getLighIntensity(light, pointToLight);
         
         vec3 l_diffuse = lightIntensity * NdotL * BRDF_lambertian(baseColor.rgb);
+#ifdef MSFS_DECAL_BLEND
+        float msfsIntensity = dot(lightIntensity, vec3(0.2126, 0.7152, 0.0722)) / M_PI;
+        msfsLightNormal += msfsIntensity * NdotL;
+        msfsLightSurface += msfsIntensity * clampedDot(normalInfo.ng, l);
+#endif
         vec3 l_specular_dielectric = vec3(0.0);
         vec3 l_specular_metal = vec3(0.0);
         vec3 l_dielectric_brdf = vec3(0.0);
@@ -467,8 +496,18 @@ void main()
 #ifdef MATERIAL_EMISSIVE_STRENGTH
     f_emissive *= u_EmissiveStrength;
 #endif
+#ifdef MSFS_PARALLAX_WINDOW
+    // Lit rooms: the emissive map is an atlas like the rooms. As in the Max shader the room
+    // also glows faintly.
 #ifdef HAS_EMISSIVE_MAP
+    f_emissive *= texture(u_EmissiveSampler, msfsRoomUV).rgb;
+#endif
+    f_emissive = (f_emissive + baseColor.rgb * 0.15) * (1.0 - msfsGlass);
+#elif defined(HAS_EMISSIVE_MAP)
     f_emissive *= texture(u_EmissiveSampler, getEmissiveUV()).rgb;
+#endif
+#ifdef MSFS_DECAL_BLEND
+    vec3 msfsDecalLit = color;
 #endif
 
 #if defined(NOT_TRIANGLE) && !defined(HAS_NORMAL_VEC3)
@@ -490,7 +529,18 @@ void main()
 #endif
 
 
+#ifdef MSFS_DECAL_BLEND
+    // ASOBO_material_geometry_decal: the sim blends each surface channel separately. Here the
+    // decal's lit color covers the surface by alpha * color factor, and its normal map relights
+    // the surface by alpha * normal factor. Premultiplied, blended as src + dst * src.a.
+    float msfsColorWeight = baseColor.a * u_MsfsDecalFactors.x;
+    float msfsShade = msfsLightSurface > 1e-4 ? msfsLightNormal / msfsLightSurface : 1.0;
+    msfsShade = mix(1.0, msfsShade, baseColor.a * u_MsfsDecalFactors.y);
+    vec3 msfsEmissive = (color - msfsDecalLit) * baseColor.a * u_MsfsDecalFactors.z;
+    g_finalColor = vec4(applyHighlight(msfsDecalLit) * msfsColorWeight + msfsEmissive, (1.0 - msfsColorWeight) * msfsShade);
+#else
     g_finalColor = vec4(applyHighlight(color.rgb), baseColor.a);
+#endif
     toneMapFlag = 2u;
 
 
