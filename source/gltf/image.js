@@ -1,5 +1,4 @@
 import { GltfObject } from "./gltf_object.js";
-import { AsyncFileReader } from "../ResourceLoader/async_file_reader.js";
 import { GL } from "../Renderer/webgl";
 import { ImageMimeType } from "./image_mime_type.js";
 import * as jpeg from "jpeg-js";
@@ -115,6 +114,40 @@ class gltfImage extends GltfObject {
         return this.image !== undefined;
     }
 
+    /**
+     * Decodes a PNG, JPEG or WebP image from a URL or Blob. Uses createImageBitmap where
+     * available, which decodes off the main thread; an HTMLImageElement would only be decoded
+     * synchronously during the first texture upload.
+     * @param {String | Blob} source
+     * @returns {Promise<ImageBitmap | HTMLImageElement>}
+     */
+    static async loadBrowserImage(source) {
+        if (typeof createImageBitmap === "undefined") {
+            if (source instanceof Blob) {
+                const objectURL = URL.createObjectURL(source);
+                try {
+                    return await gltfImage.loadHTMLImage(objectURL);
+                } finally {
+                    URL.revokeObjectURL(objectURL);
+                }
+            }
+            return await gltfImage.loadHTMLImage(source);
+        }
+        let blob = source;
+        if (!(source instanceof Blob)) {
+            const response = await fetch(source);
+            if (!response.ok) {
+                throw new Error(`Could not load image from ${source}`);
+            }
+            blob = await response.blob();
+        }
+        // Match the WebGL unpack defaults that applied to HTMLImageElement uploads.
+        return await createImageBitmap(blob, {
+            premultiplyAlpha: "none",
+            colorSpaceConversion: "default"
+        });
+    }
+
     static loadHTMLImage(url) {
         return new Promise((resolve, reject) => {
             const image = new Image();
@@ -164,9 +197,8 @@ class gltfImage extends GltfObject {
                 this.mimeType === ImageMimeType.WEBP)
         ) {
             const blob = new Blob([array], { type: this.mimeType });
-            const objectURL = URL.createObjectURL(blob);
             try {
-                this.image = await gltfImage.loadHTMLImage(objectURL);
+                this.image = await gltfImage.loadBrowserImage(blob);
             } catch {
                 throw new Error(`Could not load image "${this.name}" from buffer`);
             }
@@ -246,7 +278,7 @@ class gltfImage extends GltfObject {
                 this.mimeType === ImageMimeType.WEBP)
         ) {
             try {
-                this.image = await gltfImage.loadHTMLImage(fullPath);
+                this.image = await gltfImage.loadBrowserImage(fullPath);
             } catch {
                 throw new Error(`Could not load image from ${fullPath}`);
             }
@@ -302,11 +334,8 @@ class gltfImage extends GltfObject {
                 this.mimeType === ImageMimeType.PNG ||
                 this.mimeType === ImageMimeType.WEBP)
         ) {
-            const imageData = await AsyncFileReader.readAsDataURL(file).catch(() => {
-                console.error("Could not load image with FileReader");
-            });
             try {
-                this.image = await gltfImage.loadHTMLImage(imageData);
+                this.image = await gltfImage.loadBrowserImage(file);
             } catch {
                 console.error("Error while reading image from file " + name);
             }
