@@ -59,13 +59,56 @@ class gltfImage extends GltfObject {
             this.uri !== undefined &&
             !this.uri.startsWith("data:") &&
             !ResourceLoaderUtils.isAbsoluteUrl(this.uri);
-        return (
+        if (
             (await this.setImageFromBufferView(gltf)) ||
-            (await this.setImageFromFiles(gltf, additionalFiles)) ||
-            (!isMissingDroppedFile &&
-                (await this.setImageFromUri(gltf, allowResourceAbsolutePath))) ||
-            (await this.setImageFromBase64(gltf))
-        );
+            (await this.setImageFromFiles(gltf, additionalFiles))
+        ) {
+            return true;
+        }
+        // A URI that cannot be fetched may still be found by the texture file resolver.
+        let uriError = undefined;
+        if (!isMissingDroppedFile) {
+            try {
+                if (await this.setImageFromUri(gltf, allowResourceAbsolutePath)) {
+                    return true;
+                }
+            } catch (error) {
+                uriError = error;
+            }
+        }
+        if (await this.setImageFromResolver(gltf)) {
+            return true;
+        }
+        if (uriError !== undefined) {
+            throw uriError;
+        }
+        return await this.setImageFromBase64(gltf);
+    }
+
+    /**
+     * Asks gltf.textureFileResolver (see ResourceLoader.textureFileResolver) for a file.
+     * The MIME type follows the resolved file, which may differ from the URI (e.g. x.png.dds).
+     */
+    async setImageFromResolver(gltf) {
+        if (
+            gltf.textureFileResolver === undefined ||
+            typeof this.uri !== "string" ||
+            this.uri.startsWith("data:")
+        ) {
+            return false;
+        }
+        const resolved = await gltf.textureFileResolver(this.uri);
+        if (resolved === undefined) {
+            return false;
+        }
+        const [name, file] = resolved;
+        const uriMimeType = this.mimeType;
+        this.mimeType = undefined;
+        if (await this.setImageFromFile(gltf, name, file)) {
+            return true;
+        }
+        this.mimeType = uriMimeType;
+        return false;
     }
 
     isLoaded() {
@@ -235,17 +278,20 @@ class gltfImage extends GltfObject {
         if (foundFile === undefined) {
             return false;
         }
+        return await this.setImageFromFile(gltf, foundFile[0], foundFile[1]);
+    }
 
+    async setImageFromFile(gltf, name, file) {
         if (this.mimeType === undefined) {
-            this.setMimetypeFromFilename(foundFile[0]);
+            this.setMimetypeFromFilename(name);
         }
 
         if (isDecodedImageType(this.mimeType)) {
-            const data = new Uint8Array(await foundFile[1].arrayBuffer());
+            const data = new Uint8Array(await file.arrayBuffer());
             this.image = decodeImageBytes(this.mimeType, data);
         } else if (this.mimeType === ImageMimeType.KTX2) {
             if (gltf.ktxDecoder !== undefined) {
-                const data = new Uint8Array(await foundFile[1].arrayBuffer());
+                const data = new Uint8Array(await file.arrayBuffer());
                 this.image = await gltf.ktxDecoder.loadKtxFromBuffer(data);
             } else {
                 console.warn("Loading of ktx images failed: KtxDecoder not initalized");
@@ -256,13 +302,13 @@ class gltfImage extends GltfObject {
                 this.mimeType === ImageMimeType.PNG ||
                 this.mimeType === ImageMimeType.WEBP)
         ) {
-            const imageData = await AsyncFileReader.readAsDataURL(foundFile[1]).catch(() => {
+            const imageData = await AsyncFileReader.readAsDataURL(file).catch(() => {
                 console.error("Could not load image with FileReader");
             });
             try {
                 this.image = await gltfImage.loadHTMLImage(imageData);
             } catch {
-                console.error("Error while reading image from file " + this.uri);
+                console.error("Error while reading image from file " + name);
             }
         } else {
             console.error("Unsupported image type " + this.mimeType);

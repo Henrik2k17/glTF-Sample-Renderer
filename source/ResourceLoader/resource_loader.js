@@ -34,6 +34,11 @@ class ResourceLoader {
     constructor(view, libPath = "./libs/") {
         this.view = view;
         this.libPath = libPath;
+        /**
+         * Optional fallback for images that are neither embedded, among the external files nor
+         * fetchable: async (uri) => [fileName, Blob] | undefined. E.g. a search in texture folders.
+         */
+        this.textureFileResolver = undefined;
     }
 
     /**
@@ -103,6 +108,7 @@ class ResourceLoader {
         const gltf = new glTF(filename);
         gltf.ktxDecoder = this.view.ktxDecoder;
         gltf.moptDecoder = MeshoptDecoder;
+        gltf.textureFileResolver = this.textureFileResolver;
         //Make sure draco decoder instance is ready
         gltf.fromJson(json);
 
