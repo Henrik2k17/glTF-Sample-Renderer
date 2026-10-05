@@ -316,4 +316,50 @@ function decodeMsfsCompiledGeometry(gltf) {
     return true;
 }
 
-export { decodeMsfsCompiledGeometry, isMsfsCompiled };
+/**
+ * Skins of MSFS exports bind to the rest pose: the package builder compiles skinned vertices from
+ * the unskinned rest geometry and ignores the inverse bind matrices. Those don't always match:
+ * the Babylon.js 3ds Max exporter writes a wrong inverse bind matrix for the skeleton root (the
+ * first joint), which moves its vertices away from the mesh (e.g. 3.9 m on the A32X flaps).
+ * Rebuilds every skin's inverse bind matrices as inverse(rest world(joint)) * rest world(mesh
+ * node), which leaves the other joints unchanged. Call after decodeMsfsCompiledGeometry.
+ * @returns {number} the number of joints whose inverse bind matrix changed
+ */
+function rebindMsfsSkins(gltf) {
+    if (!gltf.skins?.length) {
+        return 0;
+    }
+    const { world } = restWorldTransforms(gltf);
+    const meshNodes = new Map(); // skin index -> first mesh node using it
+    gltf.nodes.forEach((node, index) => {
+        if (node.skin !== undefined && node.mesh !== undefined && !meshNodes.has(node.skin)) {
+            meshNodes.set(node.skin, index);
+        }
+    });
+    let changed = 0;
+    gltf.skins.forEach((skin, skinIndex) => {
+        const meshNode = meshNodes.get(skinIndex);
+        if (meshNode === undefined || skin.joints.length === 0) {
+            return;
+        }
+        const old =
+            skin.inverseBindMatrices !== undefined
+                ? gltf.accessors[skin.inverseBindMatrices].getDeinterlacedView(gltf)
+                : undefined;
+        const data = new Float32Array(skin.joints.length * 16);
+        const matrix = mat4.create();
+        skin.joints.forEach((joint, i) => {
+            mat4.invert(matrix, world(joint));
+            mat4.multiply(matrix, matrix, world(meshNode));
+            data.set(matrix, i * 16);
+            const before = old?.subarray(i * 16, i * 16 + 16);
+            if (before === undefined || matrix.some((value, k) => Math.abs(value - before[k]) > 1e-3)) {
+                changed++;
+            }
+        });
+        skin.inverseBindMatrices = pushAccessor(gltf, data, "MAT4", FLOAT, undefined);
+    });
+    return changed;
+}
+
+export { decodeMsfsCompiledGeometry, isMsfsCompiled, rebindMsfsSkins };
