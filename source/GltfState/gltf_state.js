@@ -72,6 +72,9 @@ class GltfState {
         /** If set, only primitives with one of these material indices are drawn and pickable */
         this.isolatedMaterialIndices = undefined;
 
+        /** Primitives with one of these material indices are neither drawn nor pickable. Assign a new set to apply changes. */
+        this.hiddenMaterialIndices = new Set();
+
         /* the physics controller allows selecting and controlling different physics engines */
         this.physicsController = new PhysicsController();
         /** Indicates whether the view needs to be redrawn, currently used to indicate new sorting orders for gaussian splatting */

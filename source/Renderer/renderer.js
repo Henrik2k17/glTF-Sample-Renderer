@@ -745,8 +745,11 @@ class gltfRenderer {
         gl.uniform1i(location, textureUnit);
     }
 
-    /** MSFS helper geometry and, while materials are isolated, all other materials are hidden. */
+    /** MSFS helper geometry, hidden materials and, while materials are isolated, all other materials are hidden. */
     isHiddenPrimitive(state, primitive) {
+        if (state.hiddenMaterialIndices?.has(primitive.material)) {
+            return true;
+        }
         if (
             state.isolatedMaterialIndices !== undefined &&
             !state.isolatedMaterialIndices.has(primitive.material)
@@ -789,13 +792,15 @@ class gltfRenderer {
             newNodes.nodes.length === this.nodes?.length &&
             newNodes.nodes.every((element, i) => element === this.nodes[i]) &&
             params.showMsfsInvisibleMaterials === this.showMsfsInvisibleMaterials &&
-            state.isolatedMaterialIndices === this.isolatedMaterialIndices
+            state.isolatedMaterialIndices === this.isolatedMaterialIndices &&
+            state.hiddenMaterialIndices === this.hiddenMaterialIndices
         ) {
             return;
         }
         this.nodes = newNodes.nodes;
         this.showMsfsInvisibleMaterials = params.showMsfsInvisibleMaterials;
         this.isolatedMaterialIndices = state.isolatedMaterialIndices;
+        this.hiddenMaterialIndices = state.hiddenMaterialIndices;
 
         // collect drawables by essentially zipping primitives (for geometry and material)
         // and nodes for the transform
