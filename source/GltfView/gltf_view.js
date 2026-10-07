@@ -3,6 +3,7 @@ import { gltfRenderer } from "../Renderer/renderer.js";
 import { GL } from "../Renderer/webgl.js";
 import { ResourceLoader } from "../ResourceLoader/resource_loader.js";
 import { TextureReader } from "../Renderer/texture_reader.js";
+import { FrameProfiler } from "../Renderer/frame_profiler.js";
 
 /**
  * GltfView represents a view on a gltf, e.g. in a canvas
@@ -19,6 +20,9 @@ class GltfView {
         this.context = context;
         this.renderer = new gltfRenderer(this.context);
         this.lastFrameTime = undefined;
+        /** Frame statistics for a performance overlay; set profiler.enabled to collect them. */
+        this.profiler = new FrameProfiler(this.context);
+        this.renderer.profiler = this.profiler;
     }
 
     /**
@@ -76,12 +80,24 @@ class GltfView {
      * @param {*} height of the viewport
      */
     renderFrame(state, width, height) {
+        this.profiler.beginFrame();
+        try {
+            this._renderFrame(state, width, height);
+        } finally {
+            this.profiler.endFrame();
+        }
+    }
+
+    _renderFrame(state, width, height) {
+        const profiler = this.profiler;
         const lastFrameTime =
             this.lastFrameTime === undefined ? performance.now() : this.lastFrameTime;
         this.lastFrameTime = performance.now();
         const currentFrameTime = performance.now();
         this.renderer.init(state);
+        let start = profiler.now();
         this._animate(state);
+        profiler.time("animation", start);
 
         this.renderer.resize(width, height);
 
@@ -101,9 +117,13 @@ class GltfView {
             state.graphController.simulateTick();
         }
 
+        start = profiler.now();
         scene.applyTransformHierarchy(state.gltf);
+        profiler.time("transforms", start);
         if (state.physicsController.playing && state.physicsController.enabled) {
+            start = profiler.now();
             state.physicsController.simulateStep(state, (currentFrameTime - lastFrameTime) / 1000);
+            profiler.time("physics", start);
         }
 
         this.renderer.drawScene(state, scene);

@@ -894,7 +894,10 @@ class gltfRenderer {
 
     // render complete gltf scene with given camera
     drawScene(state, scene) {
+        const profiler = this.profiler;
+        let profileStart = profiler?.now();
         this.prepareScene(state, scene);
+        profiler?.time("prepare", profileStart);
 
         let currentCamera = undefined;
 
@@ -954,11 +957,14 @@ class gltfRenderer {
         mat4.multiply(this.viewProjectionMatrix, this.projMatrix, this.viewMatrix);
 
         // Update skins.
+        profileStart = profiler?.now();
         for (const node of state.gltf.nodes) {
             if (node.mesh !== undefined && node.skin !== undefined) {
                 this.updateSkin(state, node);
             }
         }
+        profiler?.time("skins", profileStart);
+        const drawStart = profiler?.now();
 
         const instanceWorldTransforms = [];
         for (const instance of Object.values(this.opaqueDrawables)) {
@@ -996,6 +1002,7 @@ class gltfRenderer {
             this.webGl.context.viewport(aspectOffsetX, aspectOffsetY, aspectWidth, aspectHeight);
 
             let counter = 1;
+            profiler?.setPass("scatter");
             for (const drawable of this.scatterDrawables) {
                 let renderpassConfiguration = {};
                 renderpassConfiguration.linearOutput = true;
@@ -1041,6 +1048,7 @@ class gltfRenderer {
             );
             this.webGl.context.viewport(0, 0, 1, 1);
 
+            profiler?.setPass("picking");
             for (const drawable of this.selectionDrawables) {
                 let renderpassConfiguration = {};
                 renderpassConfiguration.picking = true;
@@ -1083,6 +1091,7 @@ class gltfRenderer {
             );
             this.webGl.context.viewport(0, 0, 1, 1);
 
+            profiler?.setPass("hover");
             for (const drawable of this.hoverDrawables) {
                 let renderpassConfiguration = {};
                 renderpassConfiguration.picking = true;
@@ -1098,6 +1107,7 @@ class gltfRenderer {
 
         // If any transmissive drawables are present, render all opaque and transparent drawables into a separate framebuffer.
         if (this.transmissionDrawables.length > 0) {
+            profiler?.setPass("transmission");
             // Render transmission sample texture
             this.webGl.context.bindFramebuffer(
                 this.webGl.context.FRAMEBUFFER,
@@ -1284,6 +1294,7 @@ class gltfRenderer {
         }
 
         let drawableCounter = 0;
+        profiler?.setPass("main");
         for (const instance of Object.values(this.opaqueDrawables)) {
             const drawable = instance[0];
             let renderpassConfiguration = {};
@@ -1389,7 +1400,10 @@ class gltfRenderer {
             }
         }
 
+        profiler?.time("draw", drawStart);
+        profileStart = profiler?.now();
         this.drawMsfsHelpers(state);
+        profiler?.time("helpers", profileStart);
 
         // Handle selection
         if (state.triggerSelection) {
@@ -2215,6 +2229,11 @@ class gltfRenderer {
         {
             this.webGl.context.enable(GL.POLYGON_OFFSET_FILL);
             this.webGl.context.polygonOffset(depthBias, depthBias);
+        }
+
+        if (this.profiler?.frame !== undefined) {
+            const count = drawIndexed ? state.gltf.accessors[primitive.indices].count : vertexCount;
+            this.profiler.countDraw(primitive.mode, count, instanceOffset?.length ?? 1);
         }
 
         if (drawIndexed)
