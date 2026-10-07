@@ -42,7 +42,21 @@ const HalfToFloat = (() => {
 })();
 
 function isMsfsCompiled(gltf) {
-    return gltf.asset?.extensions?.ASOBO_asset_optimized !== undefined;
+    return (
+        gltf.asset?.extensions?.ASOBO_asset_optimized !== undefined ||
+        gltf.meshes?.some((mesh) => mesh.extras?.msfsCompiled === true) === true
+    );
+}
+
+/**
+ * glTFs merged from several files (MSFS packages) can mix compiled and source exports; their
+ * compiled meshes are marked with extras.msfsCompiled.
+ */
+function isMsfsCompiledMesh(gltf, mesh) {
+    return (
+        gltf.asset?.extensions?.ASOBO_asset_optimized !== undefined ||
+        mesh.extras?.msfsCompiled === true
+    );
 }
 
 // Attributes stored as 16 bit floats behind a SHORT or UNSIGNED_SHORT component type
@@ -284,6 +298,9 @@ function decodeMsfsCompiledGeometry(gltf) {
     });
 
     gltf.meshes.forEach((mesh, meshIndex) => {
+        if (!isMsfsCompiledMesh(gltf, mesh)) {
+            return;
+        }
         const skinnedNode = skinnedMeshNodes.get(meshIndex);
         let inverseWorld = undefined;
         if (skinnedNode !== undefined) {

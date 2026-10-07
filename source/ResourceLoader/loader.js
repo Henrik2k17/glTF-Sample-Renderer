@@ -111,11 +111,16 @@ class gltfLoader {
     }
 
     static loadImages(gltf, additionalFiles, allowResourceAbsolutePath) {
-        const imagePromises = [];
-        for (let image of gltf.images) {
-            imagePromises.push(image.load(gltf, additionalFiles, allowResourceAbsolutePath));
-        }
-        return Promise.all(imagePromises);
+        // A bounded number at a time: an image can try several URLs (MSFS texture fallbacks),
+        // and thousands of parallel requests (MSFS packages) make the browser fail some with
+        // ERR_INSUFFICIENT_RESOURCES, which looks like a missing file.
+        const queue = [...gltf.images];
+        const worker = async () => {
+            for (let image = queue.shift(); image !== undefined; image = queue.shift()) {
+                await image.load(gltf, additionalFiles, allowResourceAbsolutePath);
+            }
+        };
+        return Promise.all(Array.from({ length: Math.min(16, queue.length) }, worker));
     }
 }
 

@@ -759,66 +759,72 @@ class gltfRenderer {
         return isMsfsHiddenPrimitive(state.gltf, primitive, state.renderingParameters);
     }
 
+    /** Drawables ({ node, primitive, primitiveIndex }) of the primitives of the given nodes. */
+    collectDrawables(state, nodes, include) {
+        const drawables = [];
+        for (const node of nodes) {
+            if (node.mesh === undefined) {
+                continue;
+            }
+            state.gltf.meshes[node.mesh].primitives.forEach((primitive, index) => {
+                if (include(node, primitive)) {
+                    drawables.push({ node: node, primitive: primitive, primitiveIndex: index });
+                }
+            });
+        }
+        return drawables;
+    }
+
     prepareScene(state, scene) {
         const params = state.renderingParameters;
         const newNodes = scene.gatherNodes(state.gltf, state.renderingParameters.enabledExtensions);
-        this.selectionDrawables = newNodes.selectableNodes
-            .filter((node) => node.mesh !== undefined)
-            .reduce(
-                (accumulator, node) =>
-                    accumulator.concat(
-                        state.gltf.meshes[node.mesh].primitives.map((primitive, index) => {
-                            return { node: node, primitive: primitive, primitiveIndex: index };
-                        })
-                    ),
-                []
-            )
-            .filter(({ primitive }) => !this.isHiddenPrimitive(state, primitive));
-        this.hoverDrawables = newNodes.hoverableNodes
-            .filter((node) => node.mesh !== undefined)
-            .reduce(
-                (accumulator, node) =>
-                    accumulator.concat(
-                        state.gltf.meshes[node.mesh].primitives.map((primitive, index) => {
-                            return { node: node, primitive: primitive, primitiveIndex: index };
-                        })
-                    ),
-                []
-            )
-            .filter(({ primitive }) => !this.isHiddenPrimitive(state, primitive));
 
-        // check if nodes have changed since previous frame to avoid unnecessary updates
-        if (
-            newNodes.nodes.length === this.nodes?.length &&
-            newNodes.nodes.every((element, i) => element === this.nodes[i]) &&
+        // The drawables only change with the gathered nodes or the material filters; rebuilding
+        // them every frame costs ~16 ms on large assets (MSFS packages with thousands of nodes).
+        const sameNodes = (previous, current) =>
+            previous !== undefined &&
+            previous.length === current.length &&
+            previous.every((element, i) => element === current[i]);
+        const sameFilters =
             params.showMsfsInvisibleMaterials === this.showMsfsInvisibleMaterials &&
             state.isolatedMaterialIndices === this.isolatedMaterialIndices &&
-            state.hiddenMaterialIndices === this.hiddenMaterialIndices
+            state.hiddenMaterialIndices === this.hiddenMaterialIndices &&
+            state.gltf === this.drawablesGltf;
+        const nodesChanged = !sameNodes(this.nodes, newNodes.nodes);
+
+        if (
+            !sameFilters ||
+            nodesChanged ||
+            !sameNodes(this.selectableNodes, newNodes.selectableNodes) ||
+            !sameNodes(this.hoverableNodes, newNodes.hoverableNodes)
         ) {
+            // Nodes hidden with KHR_node_visibility can't be picked either.
+            const visibleNodes = new Set(newNodes.nodes);
+            const pickable = (node, primitive) =>
+                visibleNodes.has(node) && !this.isHiddenPrimitive(state, primitive);
+            this.selectableNodes = newNodes.selectableNodes;
+            this.hoverableNodes = newNodes.hoverableNodes;
+            this.selectionDrawables = this.collectDrawables(state, newNodes.selectableNodes, pickable);
+            this.hoverDrawables = this.collectDrawables(state, newNodes.hoverableNodes, pickable);
+        }
+
+        if (sameFilters && !nodesChanged) {
             return;
         }
         this.nodes = newNodes.nodes;
         this.showMsfsInvisibleMaterials = params.showMsfsInvisibleMaterials;
         this.isolatedMaterialIndices = state.isolatedMaterialIndices;
         this.hiddenMaterialIndices = state.hiddenMaterialIndices;
+        this.drawablesGltf = state.gltf;
 
         // collect drawables by essentially zipping primitives (for geometry and material)
         // and nodes for the transform
-        const drawables = this.nodes
-            .filter((node) => node.mesh !== undefined)
-            .reduce(
-                (accumulator, node) =>
-                    accumulator.concat(
-                        state.gltf.meshes[node.mesh].primitives.map((primitive, index) => {
-                            return { node: node, primitive: primitive, primitiveIndex: index };
-                        })
-                    ),
-                []
-            )
-            .filter(
-                ({ primitive }) =>
-                    primitive.material !== undefined && !this.isHiddenPrimitive(state, primitive)
-            );
+        const drawables = this.collectDrawables(
+            state,
+            this.nodes,
+            (node, primitive) =>
+                primitive.material !== undefined && !this.isHiddenPrimitive(state, primitive)
+        );
         this.drawables = drawables;
 
         // opaque drawables don't need sorting

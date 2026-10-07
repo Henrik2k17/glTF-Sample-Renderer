@@ -222,8 +222,10 @@ class gltfMaterial extends GltfObject {
         this.dropUnloadedTextures(gltf);
 
         // MSFS assets declare whether tangent space normal maps use the DirectX (green down)
-        // or OpenGL (green up, glTF default) convention.
+        // or OpenGL (green up, glTF default) convention. Materials of glTFs merged into one
+        // (MSFS packages) carry their file's convention in extras.
         const tangentSpaceConvention =
+            this.extras?.tangentSpaceConvention ??
             gltf.asset?.extensions?.ASOBO_normal_map_convention?.tangent_space_convention;
         if (tangentSpaceConvention?.toLowerCase() === "directx") {
             this.defines.push("NORMAL_MAP_DIRECTX 1");

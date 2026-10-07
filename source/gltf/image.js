@@ -270,16 +270,20 @@ class gltfImage extends GltfObject {
      * after the URI itself; the URI's own folder and its texture.cfg are tried last.
      */
     async setImageFromTextureCfg(gltf) {
-        if (typeof this.uri !== "string" || this.uri.startsWith("data:") || !gltf.path) {
+        const modelPath = this.sourcePath(gltf);
+        if (typeof this.uri !== "string" || this.uri.startsWith("data:") || !modelPath) {
             return false;
         }
         const uri = this.uri.replace(/\\/g, "/");
         const fileName = uri.substring(uri.lastIndexOf("/") + 1);
         let textureFolders;
         try {
-            const modelUrl = new URL(gltf.path, globalThis.location?.href);
+            const modelUrl = new URL(modelPath, globalThis.location?.href);
+            // An attachment can select texture variants (texture.<name>, searched first)
             textureFolders = [
-                new URL("../texture/", modelUrl),
+                ...(this.extras?.textureFolders ?? ["../texture/"]).map(
+                    (folder) => new URL(folder, modelUrl)
+                ),
                 new URL(uri.substring(0, uri.lastIndexOf("/") + 1), modelUrl)
             ];
         } catch {
@@ -292,9 +296,14 @@ class gltfImage extends GltfObject {
             if (!gltf.msfsTextureFallbacks.has(key)) {
                 gltf.msfsTextureFallbacks.set(key, gltfImage.readTextureCfg(textureFolder));
             }
-            folders.push(textureFolder, ...(await gltf.msfsTextureFallbacks.get(key)));
+            const fallbacks = await gltf.msfsTextureFallbacks.get(key);
+            if (fallbacks === null) {
+                // the request failed (not a missing file): ask again next time
+                gltf.msfsTextureFallbacks.delete(key);
+            }
+            folders.push(textureFolder, ...(fallbacks ?? []));
         }
-        const tried = new Set([new URL(uri, new URL(gltf.path, globalThis.location?.href)).href]);
+        const tried = new Set([new URL(uri, new URL(modelPath, globalThis.location?.href)).href]);
         for (const folder of folders) {
             const candidate = new URL(fileName, folder).href;
             if (tried.has(candidate)) {
@@ -312,10 +321,18 @@ class gltfImage extends GltfObject {
         return false;
     }
 
-    /** @returns {Promise<URL[]>} the fallback folders of the texture.cfg in a folder, in order */
+    /**
+     * @returns {Promise<URL[] | null>} the fallback folders of the texture.cfg in a folder, in
+     *   order; null if the request failed
+     */
     static async readTextureCfg(textureFolder) {
+        let response;
         try {
-            const response = await fetch(new URL("texture.cfg", textureFolder));
+            response = await fetch(new URL("texture.cfg", textureFolder));
+        } catch {
+            return textureFolder.protocol.startsWith("http") ? null : [];
+        }
+        try {
             if (!response.ok) {
                 return [];
             }
@@ -340,8 +357,16 @@ class gltfImage extends GltfObject {
         if (!allowResourceAbsolutePath && ResourceLoaderUtils.isAbsoluteUrl(this.uri)) {
             throw new Error("Absolute URLs are not allowed for security reasons: " + this.uri);
         }
-        const parentPath = ResourceLoaderUtils.getContainingFolder(gltf.path ?? "");
+        const parentPath = ResourceLoaderUtils.getContainingFolder(this.sourcePath(gltf) ?? "");
         return await this.setImageFromUrl(gltf, parentPath + this.uri);
+    }
+
+    /**
+     * Path the URI is relative to: the glTF's own, or for glTFs merged into one (MSFS
+     * packages) the path of the file the image came from (extras.sourcePath).
+     */
+    sourcePath(gltf) {
+        return this.extras?.sourcePath ?? gltf.path;
     }
 
     async setImageFromUrl(gltf, fullPath) {

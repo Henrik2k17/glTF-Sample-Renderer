@@ -45,9 +45,10 @@ class gltfBuffer extends GltfObject {
             reject("Absolute URLs are not allowed for security reasons: " + this.uri);
             return true; // we return true, because the buffer has a uri, but we reject the loading due to security reasons
         }
+        // Buffers of glTFs merged into one (MSFS packages) keep the path of their own file.
         const parentPath = this.uri.startsWith("data:")
             ? ""
-            : ResourceLoaderUtils.getContainingFolder(gltf.path ?? "");
+            : ResourceLoaderUtils.getContainingFolder(this.extras?.sourcePath ?? gltf.path ?? "");
         fetch(parentPath + this.uri)
             .then((response) => {
                 if (!response.ok) {
