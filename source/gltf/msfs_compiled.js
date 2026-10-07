@@ -143,7 +143,11 @@ function decodeAttribute(gltf, name, accessor, first, count) {
     return index;
 }
 
-/** Copies part of an index accessor, swapping two corners per triangle (see above). */
+/**
+ * Copies part of an index accessor, swapping two corners per triangle (see above).
+ * Draw ranges of 65536 vertices use index 0xFFFF, which WebGL 2 always treats as primitive
+ * restart for 16 bit indices; such ranges are widened to 32 bit indices.
+ */
 function copyTriangles(gltf, accessor, firstIndex, count) {
     const bufferView = gltf.bufferViews[accessor.bufferView];
     const buffer = gltf.buffers[bufferView.buffer].buffer;
@@ -154,13 +158,16 @@ function copyTriangles(gltf, accessor, firstIndex, count) {
         firstIndex * Type.BYTES_PER_ELEMENT;
     // Index data is not necessarily aligned within the buffer, so copy it bytewise first.
     const source = new Type(buffer.slice(start, start + count * Type.BYTES_PER_ELEMENT));
-    const data = new Type(count - (count % 3));
+    const restart = Type === Uint16Array && source.includes(0xffff);
+    const OutType = restart ? Uint32Array : Type;
+    const data = new OutType(count - (count % 3));
     for (let i = 0; i < data.length; i += 3) {
         data[i] = source[i];
         data[i + 1] = source[i + 2];
         data[i + 2] = source[i + 1];
     }
-    return pushAccessor(gltf, data, "SCALAR", accessor.componentType, ELEMENT_ARRAY_BUFFER);
+    const componentType = restart ? UNSIGNED_INT : accessor.componentType;
+    return pushAccessor(gltf, data, "SCALAR", componentType, ELEMENT_ARRAY_BUFFER);
 }
 
 /** Rest pose world transforms of all nodes, from their TRS. */
