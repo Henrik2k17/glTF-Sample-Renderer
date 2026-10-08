@@ -3,6 +3,27 @@ import { isDecodedImageType } from "../ResourceLoader/image_decoders.js";
 
 let GL = undefined;
 
+/**
+ * Per image index, the texture uploads ("textureIndex:linear") the materials need. When all of an
+ * image's uploads are done, its CPU copy is released (see gltfWebGl.releaseUploadedImage).
+ */
+function collectPendingImageUploads(gltf) {
+    const pending = new Map();
+    for (const material of gltf.materials ?? []) {
+        for (const info of material.textures ?? []) {
+            const source = gltf.textures[info.index]?.source;
+            if (source === undefined) {
+                continue;
+            }
+            if (!pending.has(source)) {
+                pending.set(source, new Set());
+            }
+            pending.get(source).add(`${info.index}:${info.linear}`);
+        }
+    }
+    return pending;
+}
+
 class gltfWebGl {
     constructor(context) {
         this.context = context;
@@ -121,6 +142,43 @@ class gltfWebGl {
         }
     }
 
+    /**
+     * Drops an image's CPU copy (block-compressed levels, decoded pixels or ImageBitmap) once all
+     * texture uploads the materials need are done. Width, height, the compressed format and its
+     * byte size are kept. MSFS packages otherwise keep ~2.3 GB of texture data in the JS heap.
+     */
+    releaseUploadedImage(gltf, imageIndex, textureInfo) {
+        gltf.pendingImageUploads ??= collectPendingImageUploads(gltf);
+        const pending = gltf.pendingImageUploads.get(imageIndex);
+        if (pending === undefined) {
+            return; // not a material's texture, e.g. joints or morph targets
+        }
+        pending.delete(`${textureInfo.index}:${textureInfo.linear}`);
+        if (pending.size > 0) {
+            return;
+        }
+        gltf.pendingImageUploads.delete(imageIndex);
+        const image = gltf.images[imageIndex];
+        const content = image?.image;
+        if (content === undefined || content.released) {
+            return;
+        }
+        if (content.compressed?.levels !== undefined) {
+            content.compressed.byteLength = content.compressed.levels.reduce(
+                (sum, level) => sum + level.data.byteLength,
+                0
+            );
+            content.compressed.levels = undefined;
+            content.released = true;
+        } else if (isDecodedImageType(image.mimeType) && content.data !== undefined) {
+            content.data = undefined;
+            content.released = true;
+        } else if (typeof ImageBitmap !== "undefined" && content instanceof ImageBitmap) {
+            image.image = { width: content.width, height: content.height, released: true };
+            content.close();
+        }
+    }
+
     // Uploads an image produced by ResourceLoader/image_decoders.js (DDS, TGA, TIFF).
     uploadDecodedImage(image, textureInfo, target) {
         const decoded = image.image;
@@ -165,16 +223,36 @@ class gltfWebGl {
         if (loc === null) {
             return false;
         }
-
-        let gltfTex = gltf.textures[textureInfo.index];
-
-        if (gltfTex === undefined) {
+        const glTexture = this.getGlTexture(gltf, textureInfo);
+        if (glTexture === undefined) {
             return false;
+        }
+        const gltfTex = gltf.textures[textureInfo.index];
+        this.bindTextureUnit(texSlot, gltfTex.type, glTexture);
+        this.setSamplerUniform(loc, texSlot);
+        return this.uploadTextureData(gltf, textureInfo, glTexture, texSlot);
+    }
+
+    /**
+     * Creates and uploads a texture info's GL texture (linear or sRGB variant) if that wasn't
+     * done yet, e.g. right after loading (see gltfLoader.uploadDeferredImages).
+     * @returns {boolean} whether the texture is ready
+     */
+    uploadTexture(gltf, textureInfo, texSlot = 0) {
+        const glTexture = this.getGlTexture(gltf, textureInfo);
+        return glTexture !== undefined && this.uploadTextureData(gltf, textureInfo, glTexture, texSlot);
+    }
+
+    /** The GL texture of a texture info's variant, created (not uploaded) on first use. */
+    getGlTexture(gltf, textureInfo) {
+        const gltfTex = gltf.textures[textureInfo.index];
+        if (gltfTex === undefined) {
+            return undefined;
         }
 
         const image = gltf.images[gltfTex.source];
         if (image === undefined || image.image === undefined) {
-            return false;
+            return undefined;
         }
 
         if (
@@ -200,11 +278,13 @@ class gltfWebGl {
                 }
             }
         }
+        return textureInfo.linear ? gltfTex.glTexture : gltfTex.glTextureSRGB;
+    }
 
-        const glTexture = textureInfo.linear ? gltfTex.glTexture : gltfTex.glTextureSRGB;
-        this.bindTextureUnit(texSlot, gltfTex.type, glTexture);
-        this.setSamplerUniform(loc, texSlot);
-
+    /** Uploads the image into the variant's GL texture unless done before. */
+    uploadTextureData(gltf, textureInfo, glTexture, texSlot) {
+        const gltfTex = gltf.textures[textureInfo.index];
+        const image = gltf.images[gltfTex.source];
         if (
             (!gltfTex.initialized && textureInfo.linear) ||
             (!gltfTex.initializedSRGB && !textureInfo.linear)
@@ -215,11 +295,23 @@ class gltfWebGl {
             if (this.activeUnit !== undefined) {
                 this.activeUnit = texSlot;
             }
+            if (this.textureBindings !== undefined) {
+                this.textureBindings.set(texSlot * 0x10000 + gltfTex.type, glTexture);
+            }
 
             const gltfSampler = gltf.samplers[gltfTex.sampler];
 
             if (gltfSampler === undefined) {
                 console.warn("Sampler is undefined for texture: " + textureInfo.index);
+                return false;
+            }
+
+            if (image.image.released) {
+                // a texture the materials don't list (see collectPendingImageUploads)
+                if (!image.releaseWarned) {
+                    image.releaseWarned = true;
+                    console.warn(`Image ${gltfTex.source} was released after its upload and can't be used by texture ${textureInfo.index}`);
+                }
                 return false;
             }
 
@@ -268,6 +360,7 @@ class gltfWebGl {
             } else {
                 gltfTex.initializedSRGB = true;
             }
+            this.releaseUploadedImage(gltf, gltfTex.source, textureInfo);
         }
         if (textureInfo.linear) {
             return gltfTex.initialized;

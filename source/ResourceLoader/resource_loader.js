@@ -42,6 +42,15 @@ class ResourceLoader {
     }
 
     /**
+     * Frees the GPU and CPU memory of a glTF loaded with loadGltf that isn't shown any more.
+     * It can't be drawn afterwards.
+     * @param {glTF} gltf
+     */
+    unloadGltf(gltf) {
+        gltfLoader.unload(gltf, this.view.context);
+    }
+
+    /**
      * loadGltf asynchroneously and create resources for rendering
      * @param {(String | ArrayBuffer | File)} gltfFile the .gltf or .glb file either as path or as preloaded resource. In node.js environments, only ArrayBuffer types are accepted.
      * @param {File[]} [externalFiles] additional files containing resources that are referenced in the gltf

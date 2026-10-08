@@ -8,7 +8,9 @@ import {
     isDecodedImageType,
     decodeImageBytes,
     isBlockCompressedKtx2,
-    decodeBlockCompressedKtx2
+    decodeBlockCompressedKtx2,
+    describeBlockCompressedKtx2,
+    Ktx2HeaderBytes
 } from "../ResourceLoader/image_decoders.js";
 
 class gltfImage extends GltfObject {
@@ -187,6 +189,177 @@ class gltfImage extends GltfObject {
             // assume jpeg encoding as best guess
             this.mimeType = ImageMimeType.JPEG;
         }
+    }
+
+    /** Image types setImageFromBlob handles (browser images only where they can be decoded). */
+    static isBlobDecodable(mimeType) {
+        return (
+            isDecodedImageType(mimeType) ||
+            mimeType === ImageMimeType.KTX2 ||
+            (typeof Image !== "undefined" &&
+                (mimeType === ImageMimeType.JPEG ||
+                    mimeType === ImageMimeType.PNG ||
+                    mimeType === ImageMimeType.WEBP))
+        );
+    }
+
+    /** Decodes a texture file (this.mimeType) into this.image. */
+    async decodeBlob(gltf, blob) {
+        if (isDecodedImageType(this.mimeType)) {
+            this.image = decodeImageBytes(this.mimeType, new Uint8Array(await blob.arrayBuffer()));
+        } else if (this.mimeType === ImageMimeType.KTX2) {
+            await this.setKtx2FromBytes(gltf, new Uint8Array(await blob.arrayBuffer()));
+        } else {
+            this.image = await gltfImage.loadBrowserImage(blob);
+        }
+    }
+
+    /**
+     * Loads a texture file. With gltf.deferImageData, only its size and format stay in memory
+     * (a placeholder with released: true) and the file is kept as a Blob, which the browser
+     * may keep outside the page's memory, until gltfLoader.uploadDeferredImages decodes and
+     * uploads one image at a time. Otherwise all of a model's decoded textures (MSFS
+     * packages: ~4 GB) are in memory at once before the first draw uploads them.
+     */
+    async setImageFromBlob(gltf, blob) {
+        if (!gltf.deferImageData) {
+            await this.decodeBlob(gltf, blob);
+            return true;
+        }
+        if (this.mimeType === ImageMimeType.KTX2) {
+            // MSFS textures: size and format are in the header; no need to read the file twice
+            const header = new Uint8Array(await blob.slice(0, Ktx2HeaderBytes).arrayBuffer());
+            const description = describeBlockCompressedKtx2(header, blob.size);
+            if (description !== undefined) {
+                this.image = { ...description, released: true };
+                this.deferredSource = blob;
+                return true;
+            }
+        }
+        if (this.mimeType === ImageMimeType.PNG) {
+            // the size is in the header (IHDR); no need to decode the image twice
+            const header = new DataView(await blob.slice(0, 24).arrayBuffer());
+            if (header.byteLength === 24 && header.getUint32(12) === 0x49484452) {
+                this.image = { width: header.getUint32(16), height: header.getUint32(20), released: true };
+                this.deferredSource = blob;
+                return true;
+            }
+        }
+        await this.decodeBlob(gltf, blob);
+        const content = this.image;
+        let placeholder = undefined;
+        if (content?.compressed?.levels !== undefined) {
+            const { format, levels } = content.compressed;
+            const byteLength = levels.reduce((sum, level) => sum + level.data.byteLength, 0);
+            placeholder = { width: content.width, height: content.height, compressed: { format, byteLength } };
+        } else if (typeof ImageBitmap !== "undefined" && content instanceof ImageBitmap) {
+            placeholder = { width: content.width, height: content.height };
+            content.close();
+        } else if (isDecodedImageType(this.mimeType) && content?.data !== undefined) {
+            placeholder = { width: content.width, height: content.height };
+        }
+        if (placeholder !== undefined) {
+            placeholder.released = true;
+            this.image = placeholder;
+            this.deferredSource = blob;
+        }
+        return true;
+    }
+
+    /**
+     * For gltf.deferImageData: describes a KTX2 (block-compressed) or PNG image from the start
+     * of the file, requested with a Range header; the upload fetches the whole file. Keeping
+     * whole responses as Blobs instead made the browser write gigabytes to its blob storage
+     * (MSFS packages), which was slow.
+     * @returns {Promise<boolean>} whether the image was described; throws if the URL fails
+     */
+    async describeFromUrl(url) {
+        const headerBytes =
+            this.mimeType === ImageMimeType.KTX2 ? Ktx2HeaderBytes : this.mimeType === ImageMimeType.PNG ? 24 : 0;
+        if (headerBytes === 0) {
+            return false;
+        }
+        const response = await fetch(url, { headers: { Range: `bytes=0-${headerBytes - 1}` } });
+        if (!response.ok) {
+            throw new Error(`Could not load image from ${url}`);
+        }
+        if (response.body === null || response.body === undefined) {
+            return false;
+        }
+        // 206: just the range, its Content-Range has the file size; 200: the server sent it all
+        const header = await gltfImage.readPrefix(response, headerBytes);
+        const range = /\/(\d+)$/.exec(response.headers.get("content-range") ?? "");
+        const contentLength = Number(response.headers.get("content-length"));
+        const fileSize = range
+            ? Number(range[1])
+            : response.status === 200 && contentLength > 0
+              ? contentLength
+              : Number.MAX_SAFE_INTEGER;
+        let description = undefined;
+        if (this.mimeType === ImageMimeType.KTX2) {
+            description = describeBlockCompressedKtx2(header, fileSize);
+        } else if (header.byteLength === 24) {
+            const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+            if (view.getUint32(12) === 0x49484452) {
+                description = { width: view.getUint32(16), height: view.getUint32(20) };
+            }
+        }
+        if (description === undefined) {
+            return false;
+        }
+        this.image = { ...description, released: true };
+        this.deferredSource = { url };
+        return true;
+    }
+
+    /** The first byteCount bytes of a response body (fewer if it is shorter); cancels the rest. */
+    static async readPrefix(response, byteCount) {
+        const reader = response.body.getReader();
+        const chunks = [];
+        let length = 0;
+        while (length < byteCount) {
+            const { done, value } = await reader.read();
+            if (done) {
+                break;
+            }
+            chunks.push(value);
+            length += value.byteLength;
+        }
+        reader.cancel().catch(() => {});
+        const prefix = new Uint8Array(Math.min(length, byteCount));
+        let offset = 0;
+        for (const chunk of chunks) {
+            const part = chunk.subarray(0, prefix.byteLength - offset);
+            prefix.set(part, offset);
+            offset += part.byteLength;
+            if (offset >= prefix.byteLength) {
+                break;
+            }
+        }
+        return prefix;
+    }
+
+    /** Decodes an image loaded with gltf.deferImageData again, for its upload. */
+    async restoreDeferredImage(gltf) {
+        const source = this.deferredSource;
+        if (source === undefined) {
+            return false;
+        }
+        this.deferredSource = undefined;
+        if (source.url === undefined) {
+            await this.decodeBlob(gltf, source);
+            return true;
+        }
+        const response = await fetch(source.url);
+        if (!response.ok) {
+            throw new Error(`Could not load image from ${source.url}`);
+        }
+        if (this.mimeType === ImageMimeType.KTX2) {
+            await this.setKtx2FromBytes(gltf, new Uint8Array(await response.arrayBuffer()));
+        } else {
+            await this.decodeBlob(gltf, await response.blob());
+        }
+        return true;
     }
 
     /**
@@ -374,31 +547,18 @@ class gltfImage extends GltfObject {
             this.setMimetypeFromFilename(this.uri);
         }
 
-        if (isDecodedImageType(this.mimeType)) {
+        if (gltfImage.isBlobDecodable(this.mimeType) && typeof Blob !== "undefined") {
+            if (gltf.deferImageData && (await this.describeFromUrl(fullPath))) {
+                return true;
+            }
             const response = await fetch(fullPath);
             if (!response.ok) {
                 throw new Error(`Could not load image from ${fullPath}`);
             }
-            this.image = decodeImageBytes(
-                this.mimeType,
-                new Uint8Array(await response.arrayBuffer())
-            );
-        } else if (this.mimeType === ImageMimeType.KTX2) {
-            const response = await fetch(fullPath);
-            if (!response.ok) {
-                throw new Error(`Could not load image from ${fullPath}`);
-            }
-            await this.setKtx2FromBytes(gltf, new Uint8Array(await response.arrayBuffer()));
-        } else if (
-            typeof Image !== "undefined" &&
-            (this.mimeType === ImageMimeType.JPEG ||
-                this.mimeType === ImageMimeType.PNG ||
-                this.mimeType === ImageMimeType.WEBP)
-        ) {
             try {
-                this.image = await gltfImage.loadBrowserImage(fullPath);
-            } catch {
-                throw new Error(`Could not load image from ${fullPath}`);
+                return await this.setImageFromBlob(gltf, await response.blob());
+            } catch (error) {
+                throw new Error(`Could not load image from ${fullPath}: ${error?.message ?? error}`);
             }
         } else if (this.mimeType === ImageMimeType.JPEG && this.uri instanceof ArrayBuffer) {
             this.image = jpeg.decode(this.uri, { useTArray: true });
@@ -436,19 +596,9 @@ class gltfImage extends GltfObject {
             this.setMimetypeFromFilename(name);
         }
 
-        if (isDecodedImageType(this.mimeType)) {
-            const data = new Uint8Array(await file.arrayBuffer());
-            this.image = decodeImageBytes(this.mimeType, data);
-        } else if (this.mimeType === ImageMimeType.KTX2) {
-            await this.setKtx2FromBytes(gltf, new Uint8Array(await file.arrayBuffer()));
-        } else if (
-            typeof Image !== "undefined" &&
-            (this.mimeType === ImageMimeType.JPEG ||
-                this.mimeType === ImageMimeType.PNG ||
-                this.mimeType === ImageMimeType.WEBP)
-        ) {
+        if (gltfImage.isBlobDecodable(this.mimeType)) {
             try {
-                this.image = await gltfImage.loadBrowserImage(file);
+                return await this.setImageFromBlob(gltf, file);
             } catch {
                 console.error("Error while reading image from file " + name);
             }

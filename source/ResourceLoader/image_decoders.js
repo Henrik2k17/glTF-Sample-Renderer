@@ -97,6 +97,49 @@ function decodeBlockCompressedKtx2(bytes) {
     return { width, height, compressed: { format, levels } };
 }
 
+/** Bytes describeBlockCompressedKtx2 needs: the header and the index of up to 16 levels. */
+const Ktx2HeaderBytes = 80 + 16 * 24;
+
+/**
+ * Size, format and data size of a block-compressed KTX2 file (see isBlockCompressedKtx2) from
+ * its first Ktx2HeaderBytes bytes, without reading the image data.
+ * @param {Uint8Array} header
+ * @param {number} fileSize
+ * @returns {object | undefined} { width, height, compressed: { format, byteLength } }, or
+ *   undefined if the file isn't a block-compressed 2D KTX2 file
+ */
+function describeBlockCompressedKtx2(header, fileSize) {
+    if (!isBlockCompressedKtx2(header)) {
+        return undefined;
+    }
+    const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+    if (view.getUint32(28, true) > 1 || view.getUint32(32, true) > 1 || view.getUint32(36, true) > 1) {
+        return undefined; // not 2D: decodeBlockCompressedKtx2 reports the error
+    }
+    const levelCount = Math.max(1, view.getUint32(40, true));
+    let byteLength = 0;
+    for (let level = 0; level < levelCount; level++) {
+        const entry = 80 + level * 24;
+        if (entry + 16 > header.byteLength) {
+            return undefined;
+        }
+        const offset = Number(view.getBigUint64(entry, true));
+        const length = Number(view.getBigUint64(entry + 8, true));
+        if (offset + length > fileSize) {
+            break; // truncated file, as in decodeBlockCompressedKtx2
+        }
+        byteLength += length;
+    }
+    if (byteLength === 0) {
+        return undefined;
+    }
+    return {
+        width: view.getUint32(20, true),
+        height: Math.max(1, view.getUint32(24, true)),
+        compressed: { format: VkFormats[view.getUint32(12, true)], byteLength }
+    };
+}
+
 function fourCC(value) {
     return String.fromCharCode(
         value & 0xff,
@@ -413,6 +456,8 @@ export {
     CompressedFormats,
     isBlockCompressedKtx2,
     decodeBlockCompressedKtx2,
+    describeBlockCompressedKtx2,
+    Ktx2HeaderBytes,
     isDecodedImageType,
     decodeImageBytes,
     decodeDds,
