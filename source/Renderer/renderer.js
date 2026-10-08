@@ -34,7 +34,7 @@ import {
     sortByMsfsDrawOrder,
     getMsfsEmissiveMultiplier
 } from "../gltf/msfs.js";
-import { jsToGl } from "../gltf/utils.js";
+import { jsToGl, stringHash } from "../gltf/utils.js";
 import { getMsfsClampedTextures, updateMsfsMaterialUniforms } from "../gltf/msfs_material.js";
 import { buildMsfsHelperLines } from "../gltf/msfs_helpers.js";
 import { gltfMaterial } from "../gltf/material.js";
@@ -55,6 +55,16 @@ const NeutralTexels = {
     u_MsfsTireDetailsSampler: [255, 0, 0, 255] // no mud, no dust
 };
 const WhiteTexel = [255, 255, 255, 255];
+
+// A define list with the XOR of its defines' hashes, as ShaderCache.selectShader combines them.
+function defineList(defines) {
+    let hash = 0;
+    for (const define of defines) {
+        hash ^= stringHash(define);
+    }
+    return { defines: defines, hash: hash };
+}
+const InstancingDefines = defineList(["USE_INSTANCING 1"]);
 
 class gltfRenderer {
     constructor(context) {
@@ -111,6 +121,16 @@ class gltfRenderer {
         shaderSources.set("splat_composite.frag", splatCompositeFragShader);
 
         this.shaderCache = new ShaderCache(shaderSources, this.webGl);
+
+        // draw state caches (see selectProgram, bindVertexArray, beginPass)
+        this.programsByHash = new Map(); // vertex hash -> fragment hash -> program
+        this.shaderNameHashes = new Map();
+        this.passDefines = new Map();
+        this.frameDefines = undefined;
+        this.vertexArrayOwners = []; // primitives holding vertex arrays
+        this.passId = 0;
+        this.currentProgram = undefined;
+        this.drawState = {};
 
         this.webGl.loadWebGlExtensions();
 
@@ -734,15 +754,15 @@ class gltfRenderer {
         if (texture === undefined) {
             texture = gl.createTexture();
             gl.bindTexture(GL.TEXTURE_2D, texture);
+            this.webGl.trackBindings(this.webGl.textureBindings !== undefined); // forget the bindings
             gl.texImage2D(GL.TEXTURE_2D, 0, GL.RGBA, 1, 1, 0, GL.RGBA, GL.UNSIGNED_BYTE, new Uint8Array(texel));
             gl.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_MIN_FILTER, GL.NEAREST);
             gl.texParameteri(GL.TEXTURE_2D, GL.TEXTURE_MAG_FILTER, GL.NEAREST);
             this.neutralTextures.set(key, texture);
         }
-        gl.activeTexture(GL.TEXTURE0 + textureUnit);
-        gl.bindTexture(GL.TEXTURE_2D, texture);
+        this.webGl.bindTextureUnit(textureUnit, GL.TEXTURE_2D, texture);
         gl.bindSampler(textureUnit, null);
-        gl.uniform1i(location, textureUnit);
+        this.webGl.setSamplerUniform(location, textureUnit);
     }
 
     /** MSFS helper geometry, hidden materials and, while materials are isolated, all other materials are hidden. */
@@ -810,6 +830,9 @@ class gltfRenderer {
 
         if (sameFilters && !nodesChanged) {
             return;
+        }
+        if (state.gltf !== this.drawablesGltf) {
+            this.releaseVertexArrays();
         }
         this.nodes = newNodes.nodes;
         this.showMsfsInvisibleMaterials = params.showMsfsInvisibleMaterials;
@@ -953,6 +976,7 @@ class gltfRenderer {
             this.visibleLights.push([null, this.lightKey]);
             this.visibleLights.push([null, this.lightFill]);
         }
+        this.prepareFrameDefines(state);
 
         mat4.multiply(this.viewProjectionMatrix, this.projMatrix, this.viewMatrix);
 
@@ -1002,7 +1026,7 @@ class gltfRenderer {
             this.webGl.context.viewport(aspectOffsetX, aspectOffsetY, aspectWidth, aspectHeight);
 
             let counter = 1;
-            profiler?.setPass("scatter");
+            this.beginPass("scatter");
             for (const drawable of this.scatterDrawables) {
                 let renderpassConfiguration = {};
                 renderpassConfiguration.linearOutput = true;
@@ -1018,6 +1042,7 @@ class gltfRenderer {
                 );
                 ++counter;
             }
+            this.endPass();
             this.webGl.context.bindFramebuffer(this.webGl.context.FRAMEBUFFER, null);
         }
         if (
@@ -1048,7 +1073,7 @@ class gltfRenderer {
             );
             this.webGl.context.viewport(0, 0, 1, 1);
 
-            profiler?.setPass("picking");
+            this.beginPass("picking");
             for (const drawable of this.selectionDrawables) {
                 let renderpassConfiguration = {};
                 renderpassConfiguration.picking = true;
@@ -1060,6 +1085,7 @@ class gltfRenderer {
                     pickingViewProjection
                 );
             }
+            this.endPass();
         }
 
         pickingX = state.hoverPositions[0].x;
@@ -1091,7 +1117,7 @@ class gltfRenderer {
             );
             this.webGl.context.viewport(0, 0, 1, 1);
 
-            profiler?.setPass("hover");
+            this.beginPass("hover");
             for (const drawable of this.hoverDrawables) {
                 let renderpassConfiguration = {};
                 renderpassConfiguration.picking = true;
@@ -1103,11 +1129,11 @@ class gltfRenderer {
                     pickingViewProjection
                 );
             }
+            this.endPass();
         }
 
         // If any transmissive drawables are present, render all opaque and transparent drawables into a separate framebuffer.
         if (this.transmissionDrawables.length > 0) {
-            profiler?.setPass("transmission");
             // Render transmission sample texture
             this.webGl.context.bindFramebuffer(
                 this.webGl.context.FRAMEBUFFER,
@@ -1129,6 +1155,7 @@ class gltfRenderer {
                 ["TRANSMISSION_PASS 1"]
             );
 
+            this.beginPass("transmission");
             let drawableCounter = 0;
             for (const instance of Object.values(this.opaqueDrawables)) {
                 const drawable = instance[0];
@@ -1178,6 +1205,8 @@ class gltfRenderer {
                     this.viewProjectionMatrix
                 );
             }
+
+            this.endPass();
 
             // "blit" the multisampled opaque texture into the color buffer, which adds antialiasing
             this.webGl.context.bindFramebuffer(
@@ -1294,7 +1323,7 @@ class gltfRenderer {
         }
 
         let drawableCounter = 0;
-        profiler?.setPass("main");
+        this.beginPass("main");
         for (const instance of Object.values(this.opaqueDrawables)) {
             const drawable = instance[0];
             let renderpassConfiguration = {};
@@ -1385,6 +1414,7 @@ class gltfRenderer {
                     gl.bindFramebuffer(gl.FRAMEBUFFER, this.mainFramebuffer);
                     gl.viewport(aspectOffsetX, aspectOffsetY, aspectWidth, aspectHeight);
                     this.splatCompositePass(state, drawable.primitive.linear);
+                    this.resetDrawState();
                 }
             } else {
                 let renderpassConfiguration = {};
@@ -1400,6 +1430,7 @@ class gltfRenderer {
             }
         }
 
+        this.endPass();
         profiler?.time("draw", drawStart);
         profileStart = profiler?.now();
         this.drawMsfsHelpers(state);
@@ -1807,6 +1838,248 @@ class gltfRenderer {
 
     // vertices with given material
     // prettier-ignore
+    /**
+     * Starts a draw pass: uniforms that are the same for all draws of a pass (camera, lights,
+     * environment) are uploaded again for each program, and other code may have changed the
+     * bound program since the last pass.
+     */
+    beginPass(name)
+    {
+        this.passId++;
+        this.resetDrawState();
+        this.profiler?.setPass(name);
+    }
+
+    /** Forgets the bound program, textures and fixed function state, e.g. after other drawing. */
+    resetDrawState()
+    {
+        this.currentProgram = undefined;
+        this.drawState = {};
+        this.webGl.trackBindings(true);
+    }
+
+    /** Ends a draw pass: code after it may bind textures directly. */
+    endPass()
+    {
+        this.webGl.trackBindings(false);
+    }
+
+    /** Define lists shared by all draws of a frame; materials' lists are added when first drawn. */
+    prepareFrameDefines(state)
+    {
+        const fragDefines = [];
+        this.pushFragParameterDefines(fragDefines, state);
+        this.frameDefines = {
+            frag: defineList(fragDefines),
+            vertParameters: new Map(), // skinning and morph target count -> list
+            materials: new Map() // material -> { vert, frag }
+        };
+    }
+
+    /**
+     * The program for a draw. The define lists are assembled from parts with cached hashes
+     * (per primitive, per material and frame, per frame), and programs are looked up by the
+     * combined hash, which equals ShaderCache.selectShader's hash of the full lists. Building
+     * and hashing ~100 define strings for every draw took ~30 ms per frame on MSFS packages.
+     */
+    selectProgram(state, renderpassConfiguration, primitive, material, node, instanced)
+    {
+        const params = state.renderingParameters;
+        const frame = this.frameDefines;
+
+        let primitiveDefines = primitive.defineList;
+        if (primitiveDefines?.length !== primitive.defines.length)
+        {
+            primitiveDefines = defineList(primitive.defines.slice());
+            primitiveDefines.length = primitive.defines.length;
+            primitive.defineList = primitiveDefines;
+        }
+
+        const skinned = params.skinning && node.skin !== undefined && primitive.hasWeights && primitive.hasJoints;
+        let morphWeights = 0;
+        if (params.morphing && node.mesh !== undefined && primitive.targets.length > 0)
+        {
+            morphWeights = node.getWeights(state.gltf)?.length ?? 0;
+        }
+        const parameterKey = morphWeights * 2 + (skinned ? 1 : 0);
+        let parameterDefines = frame.vertParameters.get(parameterKey);
+        if (parameterDefines === undefined)
+        {
+            const defines = [];
+            this.pushVertParameterDefines(defines, params, state.gltf, node, primitive, params.debugOutput);
+            parameterDefines = defineList(defines);
+            frame.vertParameters.set(parameterKey, parameterDefines);
+        }
+
+        let materialDefines = frame.materials.get(material);
+        if (materialDefines === undefined)
+        {
+            const vert = [...(material.msfsVertDefines ?? [])];
+            if (material.textureTransforms.some((transform) => transform?.key === "Normal"))
+            {
+                vert.push("HAS_VERT_NORMAL_UV_TRANSFORM 1");
+            }
+            materialDefines = { vert: defineList(vert), frag: defineList(material.getDefines(params)) };
+            frame.materials.set(material, materialDefines);
+        }
+
+        const passKey = (renderpassConfiguration.linearOutput ? 1 : 0) + (renderpassConfiguration.transmission ? 2 : 0);
+        let passDefines = this.passDefines.get(passKey);
+        if (passDefines === undefined)
+        {
+            const defines = [];
+            if (renderpassConfiguration.linearOutput)
+            {
+                defines.push("LINEAR_OUTPUT 1");
+            }
+            if (renderpassConfiguration.transmission)
+            {
+                defines.push("TRANSMISSION_PASS 1");
+            }
+            passDefines = defineList(defines);
+            this.passDefines.set(passKey, passDefines);
+        }
+
+        const vertexShader = renderpassConfiguration.picking ? "picking.vert" : "primitive.vert";
+        let fragmentShader = "pbr.frag";
+        if (material.type === "SG") {
+            fragmentShader = "specular_glossiness.frag";
+        } else if (renderpassConfiguration.scatter) {
+            fragmentShader = "scatter.frag";
+        } else if (renderpassConfiguration.picking) {
+        	fragmentShader = "picking.frag";
+        }
+
+        const vertexParts = [primitiveDefines, parameterDefines, materialDefines.vert];
+        if (instanced)
+        {
+            vertexParts.push(InstancingDefines);
+        }
+        const fragmentParts = [materialDefines.frag, ...vertexParts, passDefines, frame.frag];
+        const flatten = (parts) => parts.flatMap((part) => part.defines);
+
+        // POINTS, LINES, LINE_LOOP, LINE_STRIP: rare, so not cached
+        if (primitive.mode < 4) {
+            let fragDefines = flatten(fragmentParts);
+            fragDefines.push("NOT_TRIANGLE 1");
+            if (primitive.attributes?.NORMAL !== undefined && primitive.attributes?.TANGENT === undefined) {
+                //Points or Lines with NORMAL but without TANGENT attributes SHOULD be rendered with standard lighting but ignoring any normal textures on the material.
+                fragDefines = fragDefines.filter(e => e !== "HAS_NORMAL_MAP 1" && e !== "HAS_CLEARCOAT_NORMAL_MAP 1");
+            }
+            const fragmentHash = this.shaderCache.selectShader(fragmentShader, fragDefines);
+            const vertexHash = this.shaderCache.selectShader(vertexShader, flatten(vertexParts));
+            return fragmentHash && vertexHash ? this.shaderCache.getShaderProgram(fragmentHash, vertexHash) : undefined;
+        }
+
+        const shaderNameHash = (name) => {
+            let hash = this.shaderNameHashes.get(name);
+            if (hash === undefined)
+            {
+                hash = stringHash(name);
+                this.shaderNameHashes.set(name, hash);
+            }
+            return hash;
+        };
+        let vertexHash = shaderNameHash(vertexShader);
+        for (const part of vertexParts)
+        {
+            vertexHash ^= part.hash;
+        }
+        let fragmentHash = shaderNameHash(fragmentShader);
+        for (const part of fragmentParts)
+        {
+            fragmentHash ^= part.hash;
+        }
+
+        let programs = this.programsByHash.get(vertexHash);
+        if (programs === undefined)
+        {
+            programs = new Map();
+            this.programsByHash.set(vertexHash, programs);
+        }
+        let program = programs.get(fragmentHash);
+        if (program === undefined)
+        {
+            const compiledFragmentHash = this.shaderCache.selectShader(fragmentShader, flatten(fragmentParts));
+            const compiledVertexHash = this.shaderCache.selectShader(vertexShader, flatten(vertexParts));
+            if (!compiledFragmentHash || !compiledVertexHash)
+            {
+                return undefined;
+            }
+            program = this.shaderCache.getShaderProgram(compiledFragmentHash, compiledVertexHash);
+            if (program === undefined)
+            {
+                return undefined;
+            }
+            programs.set(fragmentHash, program);
+        }
+        return program;
+    }
+
+    /**
+     * Binds the primitive's vertex array for the current program (attribute locations differ
+     * between programs), creating it on first use. Returns { vertexArray, vertexCount }, or
+     * undefined if the primitive can't be drawn.
+     */
+    bindVertexArray(state, renderpassConfiguration, primitive)
+    {
+        const gl = this.webGl.context;
+        primitive.vertexArrays ??= new Map();
+        let entry = primitive.vertexArrays.get(this.shader);
+        if (entry !== undefined)
+        {
+            gl.bindVertexArray(entry.vertexArray);
+            return entry;
+        }
+
+        entry = { vertexArray: gl.createVertexArray(), vertexCount: 0 };
+        gl.bindVertexArray(entry.vertexArray);
+        const fail = () => {
+            gl.bindVertexArray(null);
+            gl.deleteVertexArray(entry.vertexArray);
+            return undefined;
+        };
+        if (primitive.indices !== undefined && !this.webGl.setIndices(state.gltf, primitive.indices))
+        {
+            return fail();
+        }
+        for (const attribute of primitive.glAttributes)
+        {
+            if (renderpassConfiguration.picking && (attribute.attribute !== "POSITION" || attribute.attribute.startsWith("JOINTS") || attribute.attribute.startsWith("WEIGHTS"))) {
+                continue;
+            }
+            const gltfAccessor = state.gltf.accessors[attribute.accessor];
+            entry.vertexCount = gltfAccessor.count;
+
+            const location = this.shader.getAttributeLocation(attribute.name);
+            if (location === null || location < 0)
+            {
+                continue; // only skip this attribute
+            }
+            if (!this.webGl.enableAttribute(state.gltf, location, gltfAccessor))
+            {
+                return fail(); // skip this primitive
+            }
+        }
+        primitive.vertexArrays.set(this.shader, entry);
+        this.vertexArrayOwners.push(primitive);
+        return entry;
+    }
+
+    /** Deletes the vertex arrays of the previous glTF. */
+    releaseVertexArrays()
+    {
+        for (const primitive of this.vertexArrayOwners)
+        {
+            for (const { vertexArray } of primitive.vertexArrays?.values() ?? [])
+            {
+                this.webGl.context.deleteVertexArray(vertexArray);
+            }
+            primitive.vertexArrays = undefined;
+        }
+        this.vertexArrayOwners = [];
+    }
+
     drawPrimitive(state, renderpassConfiguration, primitive, node, viewProjectionMatrix, sampledTextures, instanceOffset = undefined)
     {
         if (primitive.skip) return;
@@ -1831,79 +2104,37 @@ class gltfRenderer {
         }
 
         //select shader permutation, compile and link program.
-
-        let vertDefines = [];
-        this.pushVertParameterDefines(
-            vertDefines,
-            state.renderingParameters,
-            state.gltf,
-            node,
-            primitive,
-            state.renderingParameters.debugOutput
-        );
-        vertDefines = primitive.defines.concat(vertDefines);
-        vertDefines.push(...(material.msfsVertDefines ?? []));
-        if (instanceOffset !== undefined) {
-            vertDefines.push("USE_INSTANCING 1");
-        }
-        if (material.textureTransforms.length > 0) {
-            for (let i = 0; i < material.textureTransforms.length; i++) {
-                if (material.textureTransforms[i] !== undefined && material.textureTransforms[i].key === "Normal") {
-                    vertDefines.push("HAS_VERT_NORMAL_UV_TRANSFORM 1");
-                    break;
-                }
-            }
-        }
-
-        let fragDefines = material.getDefines(state.renderingParameters).concat(vertDefines);
-        if (renderpassConfiguration.linearOutput)
-        {
-            fragDefines.push("LINEAR_OUTPUT 1");
-        }
-        if (renderpassConfiguration.transmission)
-        {
-            fragDefines.push("TRANSMISSION_PASS 1");
-        }
-
-        // POINTS, LINES, LINE_LOOP, LINE_STRIP
-        if (primitive.mode < 4) {
-            fragDefines.push("NOT_TRIANGLE 1");
-            if (primitive.attributes?.NORMAL !== undefined && primitive.attributes?.TANGENT === undefined) {
-                //Points or Lines with NORMAL but without TANGENT attributes SHOULD be rendered with standard lighting but ignoring any normal textures on the material.
-                fragDefines = fragDefines.filter(e => e !== "HAS_NORMAL_MAP 1" && e !== "HAS_CLEARCOAT_NORMAL_MAP 1");
-            }
-        }
-
-        this.pushFragParameterDefines(fragDefines, state);
-        
-        const vertexShader = renderpassConfiguration.picking ? "picking.vert" : "primitive.vert";
-        let fragmentShader = "pbr.frag";
-        if (material.type === "SG") {
-            fragmentShader = "specular_glossiness.frag";
-        } else if (renderpassConfiguration.scatter) {
-            fragmentShader = "scatter.frag";
-        } else if (renderpassConfiguration.picking) {
-        	fragmentShader = "picking.frag";
-        }
-
-        const fragmentHash = this.shaderCache.selectShader(fragmentShader, fragDefines);
-        const vertexHash = this.shaderCache.selectShader(vertexShader, vertDefines);
-
-        if (fragmentHash && vertexHash)
-        {
-            this.shader = this.shaderCache.getShaderProgram(fragmentHash, vertexHash);
-        }
-
-        if (this.shader === undefined)
+        const shader = this.selectProgram(state, renderpassConfiguration, primitive, material, node, instanceOffset !== undefined);
+        if (shader === undefined)
         {
             return;
         }
+        this.shader = shader;
 
-        this.webGl.context.useProgram(this.shader.program);
-
-        if (state.renderingParameters.usePunctual && !renderpassConfiguration.picking)
+        if (this.currentProgram !== shader.program)
         {
-            this.applyLights();
+            this.webGl.context.useProgram(shader.program);
+            this.currentProgram = shader.program;
+        }
+
+        // Uniforms persist per program: values that are the same for the whole pass are
+        // uploaded once per program and pass, material values when the material changes.
+        if (shader.passId !== this.passId)
+        {
+            shader.passId = this.passId;
+            shader.lastMaterial = undefined;
+            shader.lastNode = undefined;
+            this.shader.updateUniform("u_ViewProjectionMatrix", viewProjectionMatrix);
+            this.shader.updateUniform("u_Exposure", state.renderingParameters.exposure, false);
+            this.shader.updateUniform("u_Camera", this.currentCameraPosition, false);
+            if (!renderpassConfiguration.picking)
+            {
+                if (state.renderingParameters.usePunctual)
+                {
+                    this.applyLights();
+                }
+                this.applyEnvironmentUniforms(state);
+            }
         }
 
         if (renderpassConfiguration.scatter) {
@@ -1911,17 +2142,17 @@ class gltfRenderer {
         }
 
         const worldTransform = node.getRenderedWorldTransform();
-      
-        const normalMatrix = mat4.create();
-        mat4.invert(normalMatrix, node.getRenderedWorldTransform());
-        mat4.transpose(normalMatrix, normalMatrix);
 
-        // update model dependant matrices once per node
-        this.shader.updateUniform("u_ViewProjectionMatrix", viewProjectionMatrix);
-        this.shader.updateUniform("u_ModelMatrix", worldTransform);
-        this.shader.updateUniform("u_NormalMatrix", normalMatrix, false);
-        this.shader.updateUniform("u_Exposure", state.renderingParameters.exposure, false);
-        this.shader.updateUniform("u_Camera", this.currentCameraPosition, false);
+        // update model dependant matrices once per node (primitives of a mesh follow each other)
+        if (shader.lastNode !== node)
+        {
+            shader.lastNode = node;
+            const normalMatrix = mat4.create();
+            mat4.invert(normalMatrix, worldTransform);
+            mat4.transpose(normalMatrix, normalMatrix);
+            this.shader.updateUniform("u_ModelMatrix", worldTransform);
+            this.shader.updateUniform("u_NormalMatrix", normalMatrix, false);
+        }
         if (renderpassConfiguration.picking) {
             // Node picking id in the low 24 bits, primitive index within the mesh in the high 8.
             const primitiveIndex = Math.min(
@@ -1950,74 +2181,68 @@ class gltfRenderer {
 
         this.updateAnimationUniforms(state, node, primitive);
 
-        if (mat4.determinant(worldTransform) < 0.0)
+        // Fixed function state, set when it differs from the previous draw of the pass.
+        const glState = this.drawState;
+        const frontFace = mat4.determinant(worldTransform) < 0.0 ? GL.CW : GL.CCW;
+        if (glState.frontFace !== frontFace)
         {
-            this.webGl.context.frontFace(GL.CW);
-        }
-        else
-        {
-            this.webGl.context.frontFace(GL.CCW);
+            glState.frontFace = frontFace;
+            this.webGl.context.frontFace(frontFace);
         }
 
-        if (material.doubleSided || renderpassConfiguration.picking)
+        const cull = !(material.doubleSided || renderpassConfiguration.picking);
+        if (glState.cull !== cull)
         {
-            this.webGl.context.disable(GL.CULL_FACE);
-        }
-        else
-        {
-            this.webGl.context.enable(GL.CULL_FACE);
-        }
-    
-        if (material.alphaMode === 'BLEND' && !renderpassConfiguration.picking)
-        {
-            this.webGl.context.enable(GL.BLEND);
-            if (material.msfs?.decalFactors !== undefined && state.renderingParameters.debugOutput === GltfState.DebugOutput.NONE)
+            glState.cull = cull;
+            if (cull)
             {
-                // MSFS geometry decal: premultiplied color plus a relighting factor in alpha
-                this.webGl.context.blendFuncSeparate(GL.ONE, GL.SRC_ALPHA, GL.ZERO, GL.ONE);
+                this.webGl.context.enable(GL.CULL_FACE);
             }
             else
             {
-                this.webGl.context.blendFuncSeparate(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA, GL.ONE, GL.ONE_MINUS_SRC_ALPHA);
+                this.webGl.context.disable(GL.CULL_FACE);
             }
-            this.webGl.context.blendEquation(GL.FUNC_ADD);
-            this.webGl.context.depthMask(false);
         }
-        else
+    
+        // 0: opaque, 1: alpha blend, 2: MSFS geometry decal
+        let blend = 0;
+        if (material.alphaMode === 'BLEND' && !renderpassConfiguration.picking)
         {
-            this.webGl.context.disable(GL.BLEND);
-            this.webGl.context.depthMask(true);
+            blend = material.msfs?.decalFactors !== undefined && state.renderingParameters.debugOutput === GltfState.DebugOutput.NONE ? 2 : 1;
+        }
+        if (glState.blend !== blend)
+        {
+            glState.blend = blend;
+            if (blend !== 0)
+            {
+                this.webGl.context.enable(GL.BLEND);
+                if (blend === 2)
+                {
+                    // MSFS geometry decal: premultiplied color plus a relighting factor in alpha
+                    this.webGl.context.blendFuncSeparate(GL.ONE, GL.SRC_ALPHA, GL.ZERO, GL.ONE);
+                }
+                else
+                {
+                    this.webGl.context.blendFuncSeparate(GL.SRC_ALPHA, GL.ONE_MINUS_SRC_ALPHA, GL.ONE, GL.ONE_MINUS_SRC_ALPHA);
+                }
+                this.webGl.context.blendEquation(GL.FUNC_ADD);
+                this.webGl.context.depthMask(false);
+            }
+            else
+            {
+                this.webGl.context.disable(GL.BLEND);
+                this.webGl.context.depthMask(true);
+            }
         }
         
 
         const drawIndexed = primitive.indices !== undefined;
-        if (drawIndexed)
+        const vertexArray = this.bindVertexArray(state, renderpassConfiguration, primitive);
+        if (vertexArray === undefined)
         {
-            if (!this.webGl.setIndices(state.gltf, primitive.indices))
-            {
-                return;
-            }
+            return;
         }
-
-        let vertexCount = 0;
-        for (const attribute of primitive.glAttributes)
-        {
-            if (renderpassConfiguration.picking && (attribute.attribute !== "POSITION" || attribute.attribute.startsWith("JOINTS") || attribute.attribute.startsWith("WEIGHTS"))) {
-                continue;
-            }
-            const gltfAccessor = state.gltf.accessors[attribute.accessor];
-            vertexCount = gltfAccessor.count;
-
-            const location = this.shader.getAttributeLocation(attribute.name);
-            if (location === null)
-            {
-                continue; // only skip this attribute
-            }
-            if (!this.webGl.enableAttribute(state.gltf, location, gltfAccessor))
-            {
-                return; // skip this primitive
-            }
-        }
+        const vertexCount = vertexArray.vertexCount;
 
         if (instanceOffset !== undefined) {
             const location = this.shader.getAttributeLocation("a_instance_model_matrix");
@@ -2050,6 +2275,146 @@ class gltfRenderer {
         }
 
         // Update material uniforms
+        if (shader.lastMaterial !== material)
+        {
+            shader.lastMaterial = material;
+            this.updateMaterialUniforms(state, material);
+        }
+
+        const msfsClamp = renderpassConfiguration.picking ? undefined : getMsfsClampedTextures(material);
+        let textureIndex = 0;
+        for (; textureIndex < material.textures.length; ++textureIndex)
+        {
+            let info = material.textures[textureIndex];
+            const location = this.shader.getUniformLocation(info.samplerName);
+            if (info.debugDisabled && !renderpassConfiguration.picking)
+            {
+                this.bindNeutralTexture(location, info.samplerName, textureIndex);
+                continue;
+            }
+            if (!this.webGl.setTexture(location, state.gltf, info, textureIndex))
+            {
+                continue;
+            }
+            if (msfsClamp?.textures.has(info))
+            {
+                this.bindMsfsClampSampler(state.gltf, info, msfsClamp, textureIndex);
+            }
+        }
+
+
+        // set the morph target texture
+        if (primitive.morphTargetTextureInfo !== undefined)
+        {
+            const location = this.shader.getUniformLocation(primitive.morphTargetTextureInfo.samplerName);
+            this.webGl.setTexture(location, state.gltf, primitive.morphTargetTextureInfo, textureIndex); // binds texture and sampler
+            textureIndex++;
+        }
+
+        // set the joints texture
+        if (state.renderingParameters.skinning && node.skin !== undefined && primitive.hasWeights && primitive.hasJoints)
+        {
+            const skin = state.gltf.skins[node.skin];
+            const location = this.shader.getUniformLocation(skin.jointTextureInfo.samplerName);
+            this.webGl.setTexture(location, state.gltf, skin.jointTextureInfo, textureIndex); // binds texture and sampler
+            textureIndex++;
+        }
+
+        if (!renderpassConfiguration.picking) {
+            let textureCount = textureIndex;
+
+            textureCount = this.applyEnvironmentMap(state, textureCount);
+
+
+            if (state.environment !== undefined)
+            {
+                this.webGl.setTexture(this.shader.getUniformLocation("u_SheenELUT"), state.environment, state.environment.sheenELUT, textureCount++);
+            }
+
+	        if (material.hasVolumeScatter && sampledTextures?.scatterSampleTexture !== undefined)
+	        {
+	            this.webGl.bindTextureUnit(textureCount, GL.TEXTURE_2D, sampledTextures.scatterSampleTexture);
+	            this.webGl.context.uniform1i(this.shader.getUniformLocation("u_ScatterFramebufferSampler"), textureCount);
+	            textureCount++;
+
+	            this.webGl.bindTextureUnit(textureCount, GL.TEXTURE_2D, sampledTextures.scatterDepthSampleTexture);
+	            this.webGl.context.uniform1i(this.shader.getUniformLocation("u_ScatterDepthFramebufferSampler"), textureCount);
+	            textureCount++;
+
+	            this.webGl.context.uniform1f(this.shader.getUniformLocation("u_MinRadius"), gltfMaterial.scatterMinRadius);
+	            this.webGl.context.uniform2i(this.shader.getUniformLocation("u_FramebufferSize"), renderpassConfiguration.frameBufferSize[0], renderpassConfiguration.frameBufferSize[1]);
+	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ProjectionMatrix"),false, this.projMatrix);
+
+	            this.shader.updateUniformArray("u_ScatterSamples", gltfMaterial.scatterSamples);
+	        }
+
+	        if(sampledTextures?.transmissionSampleTexture !== undefined &&
+	            state.environment &&
+	            state.renderingParameters.enabledExtensions.KHR_materials_transmission)
+	        {
+	            this.webGl.bindTextureUnit(textureCount, GL.TEXTURE_2D, this.opaqueRenderTexture);
+	            this.webGl.context.uniform1i(this.shader.getUniformLocation("u_TransmissionFramebufferSampler"), textureCount);
+	            textureCount++;
+
+	            this.webGl.context.uniform2i(this.shader.getUniformLocation("u_TransmissionFramebufferSize"), this.opaqueFramebufferWidth, this.opaqueFramebufferHeight);
+
+	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ModelMatrix"),false, worldTransform);
+	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ViewMatrix"),false, this.viewMatrix);
+	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ProjectionMatrix"),false, this.projMatrix);
+	        }
+	    }
+
+        // MSFS geometry decals need a depth bias to win against the surface they lie on.
+        const depthBias = getMsfsDepthBias(material);
+        if (depthBias !== 0)
+        {
+            this.webGl.context.enable(GL.POLYGON_OFFSET_FILL);
+            this.webGl.context.polygonOffset(depthBias, depthBias);
+        }
+
+        if (this.profiler?.frame !== undefined) {
+            const count = drawIndexed ? state.gltf.accessors[primitive.indices].count : vertexCount;
+            this.profiler.countDraw(primitive.mode, count, instanceOffset?.length ?? 1);
+        }
+
+        if (drawIndexed)
+        {
+            const indexAccessor = state.gltf.accessors[primitive.indices];
+            if (instanceOffset !== undefined) {
+                this.webGl.context.drawElementsInstanced(primitive.mode, indexAccessor.count, indexAccessor.componentType, 0, instanceOffset.length);
+            } else {
+                this.webGl.context.drawElements(primitive.mode, indexAccessor.count, indexAccessor.componentType, 0);
+            }
+        }
+        else
+        {
+            if (instanceOffset !== undefined) {
+                this.webGl.context.drawArraysInstanced(primitive.mode, 0, vertexCount, instanceOffset.length);
+            } else {
+                this.webGl.context.drawArrays(primitive.mode, 0, vertexCount);
+            }
+        }
+
+        if (depthBias !== 0)
+        {
+            this.webGl.context.disable(GL.POLYGON_OFFSET_FILL);
+        }
+
+        // Sampler objects stay bound to their unit; release them for later draws.
+        for (const unit of this.msfsSamplerUnits)
+        {
+            this.webGl.context.bindSampler(unit, null);
+        }
+        this.msfsSamplerUnits.length = 0;
+
+        // The vertex array holds the attribute setup (instance attributes included); unbind
+        // it so that code drawing without one doesn't change it.
+        this.webGl.context.bindVertexArray(null);
+    }
+
+    /** Material uniforms; uploaded when a program draws a different material than before. */
+    updateMaterialUniforms(state, material)
+    {
         material.updateTextureTransforms(this.shader);
 
         this.shader.updateUniform("u_EmissiveFactor", jsToGl(material.emissiveFactor));
@@ -2136,159 +2501,6 @@ class gltfRenderer {
         this.shader.updateUniform("u_MultiScatterColor", jsToGl(material.extensions?.KHR_materials_volume_scatter?.multiscatterColor));
     
         updateMsfsMaterialUniforms(this.shader, material);
-
-        const msfsClamp = renderpassConfiguration.picking ? undefined : getMsfsClampedTextures(material);
-        let textureIndex = 0;
-        for (; textureIndex < material.textures.length; ++textureIndex)
-        {
-            let info = material.textures[textureIndex];
-            const location = this.shader.getUniformLocation(info.samplerName);
-            if (info.debugDisabled && !renderpassConfiguration.picking)
-            {
-                this.bindNeutralTexture(location, info.samplerName, textureIndex);
-                continue;
-            }
-            if (!this.webGl.setTexture(location, state.gltf, info, textureIndex))
-            {
-                continue;
-            }
-            if (msfsClamp?.textures.has(info))
-            {
-                this.bindMsfsClampSampler(state.gltf, info, msfsClamp, textureIndex);
-            }
-        }
-
-
-        // set the morph target texture
-        if (primitive.morphTargetTextureInfo !== undefined) 
-        {
-            const location = this.shader.getUniformLocation(primitive.morphTargetTextureInfo.samplerName);
-            this.webGl.setTexture(location, state.gltf, primitive.morphTargetTextureInfo, textureIndex); // binds texture and sampler
-            textureIndex++;
-        }
-
-        // set the joints texture
-        if (state.renderingParameters.skinning && node.skin !== undefined && primitive.hasWeights && primitive.hasJoints) 
-        {
-            const skin = state.gltf.skins[node.skin];
-            const location = this.shader.getUniformLocation(skin.jointTextureInfo.samplerName);
-            this.webGl.setTexture(location, state.gltf, skin.jointTextureInfo, textureIndex); // binds texture and sampler
-            textureIndex++;
-        }
-
-        if (!renderpassConfiguration.picking) {
-            let textureCount = textureIndex;
-
-            textureCount = this.applyEnvironmentMap(state, textureCount);
-
-
-            if (state.environment !== undefined)
-            {
-                this.webGl.setTexture(this.shader.getUniformLocation("u_SheenELUT"), state.environment, state.environment.sheenELUT, textureCount++);
-            }
-
-	        if (material.hasVolumeScatter && sampledTextures?.scatterSampleTexture !== undefined)
-	        {
-	            this.webGl.context.activeTexture(GL.TEXTURE0 + textureCount);
-	            this.webGl.context.bindTexture(this.webGl.context.TEXTURE_2D, sampledTextures.scatterSampleTexture);
-	            this.webGl.context.uniform1i(this.shader.getUniformLocation("u_ScatterFramebufferSampler"), textureCount);
-	            textureCount++;
-	
-	            this.webGl.context.activeTexture(GL.TEXTURE0 + textureCount);
-	            this.webGl.context.bindTexture(this.webGl.context.TEXTURE_2D, sampledTextures.scatterDepthSampleTexture);
-	            this.webGl.context.uniform1i(this.shader.getUniformLocation("u_ScatterDepthFramebufferSampler"), textureCount);
-	            textureCount++;
-	
-	            this.webGl.context.uniform1f(this.shader.getUniformLocation("u_MinRadius"), gltfMaterial.scatterMinRadius);
-	            this.webGl.context.uniform2i(this.shader.getUniformLocation("u_FramebufferSize"), renderpassConfiguration.frameBufferSize[0], renderpassConfiguration.frameBufferSize[1]);
-	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ProjectionMatrix"),false, this.projMatrix);
-	
-	            this.shader.updateUniformArray("u_ScatterSamples", gltfMaterial.scatterSamples);
-	        }
-	
-	        if(sampledTextures?.transmissionSampleTexture !== undefined &&
-	            state.environment &&
-	            state.renderingParameters.enabledExtensions.KHR_materials_transmission)
-	        {
-	            this.webGl.context.activeTexture(GL.TEXTURE0 + textureCount);
-	            this.webGl.context.bindTexture(this.webGl.context.TEXTURE_2D, this.opaqueRenderTexture);
-	            this.webGl.context.uniform1i(this.shader.getUniformLocation("u_TransmissionFramebufferSampler"), textureCount);
-	            textureCount++;
-	
-	            this.webGl.context.uniform2i(this.shader.getUniformLocation("u_TransmissionFramebufferSize"), this.opaqueFramebufferWidth, this.opaqueFramebufferHeight);
-	
-	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ModelMatrix"),false, worldTransform);
-	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ViewMatrix"),false, this.viewMatrix);
-	            this.webGl.context.uniformMatrix4fv(this.shader.getUniformLocation("u_ProjectionMatrix"),false, this.projMatrix);
-	        }
-	    }
-	    
-        // MSFS geometry decals need a depth bias to win against the surface they lie on.
-        const depthBias = getMsfsDepthBias(material);
-        if (depthBias !== 0)
-        {
-            this.webGl.context.enable(GL.POLYGON_OFFSET_FILL);
-            this.webGl.context.polygonOffset(depthBias, depthBias);
-        }
-
-        if (this.profiler?.frame !== undefined) {
-            const count = drawIndexed ? state.gltf.accessors[primitive.indices].count : vertexCount;
-            this.profiler.countDraw(primitive.mode, count, instanceOffset?.length ?? 1);
-        }
-
-        if (drawIndexed)
-        {
-            const indexAccessor = state.gltf.accessors[primitive.indices];
-            if (instanceOffset !== undefined) {
-                this.webGl.context.drawElementsInstanced(primitive.mode, indexAccessor.count, indexAccessor.componentType, 0, instanceOffset.length);
-            } else {
-                this.webGl.context.drawElements(primitive.mode, indexAccessor.count, indexAccessor.componentType, 0);
-            }
-        }
-        else
-        {
-            if (instanceOffset !== undefined) {
-                this.webGl.context.drawArraysInstanced(primitive.mode, 0, vertexCount, instanceOffset.length);
-            } else {
-                this.webGl.context.drawArrays(primitive.mode, 0, vertexCount);
-            }
-        }
-
-        if (depthBias !== 0)
-        {
-            this.webGl.context.disable(GL.POLYGON_OFFSET_FILL);
-        }
-
-        // Sampler objects stay bound to their unit; release them for later draws.
-        for (const unit of this.msfsSamplerUnits)
-        {
-            this.webGl.context.bindSampler(unit, null);
-        }
-        this.msfsSamplerUnits.length = 0;
-
-        for (const attribute of primitive.glAttributes)
-        {
-            if (renderpassConfiguration.picking && (attribute.attribute !== "POSITION" || attribute.attribute.startsWith("JOINTS") || attribute.attribute.startsWith("WEIGHTS"))) {
-                continue;
-            }
-            const location = this.shader.getAttributeLocation(attribute.name);
-            if (location === null)
-            {
-                continue; // skip this attribute
-            }
-            this.webGl.context.disableVertexAttribArray(location);
-        }
-        if (instanceOffset !== undefined) {
-            const location = this.shader.getAttributeLocation("a_instance_model_matrix");
-            this.webGl.context.vertexAttribDivisor(location, 0);
-            this.webGl.context.vertexAttribDivisor(location + 1, 0);
-            this.webGl.context.vertexAttribDivisor(location + 2, 0);
-            this.webGl.context.vertexAttribDivisor(location + 3, 0);
-            this.webGl.context.disableVertexAttribArray(location);
-            this.webGl.context.disableVertexAttribArray(location + 1);
-            this.webGl.context.disableVertexAttribArray(location + 2);
-            this.webGl.context.disableVertexAttribArray(location + 3);
-        }
     }
 
     /// Compute a list of lights instantiated by one or more nodes as a list of node-light tuples.
@@ -2637,6 +2849,15 @@ class gltfRenderer {
             texSlotOffset++
         );
 
+        return texSlotOffset;
+    }
+
+    /** Environment uniforms; the same for all draws of a pass. */
+    applyEnvironmentUniforms(state) {
+        const environment = state.environment;
+        if (environment === undefined) {
+            return;
+        }
         this.shader.updateUniform("u_MipCount", environment.mipCount);
 
         let rotMatrix4 = mat4.create();
@@ -2658,7 +2879,6 @@ class gltfRenderer {
 
         this.shader.updateUniform("u_EnvIntensity", envIntensity);
 
-        return texSlotOffset;
     }
 
     destroy() {

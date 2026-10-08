@@ -9,6 +9,48 @@ class gltfWebGl {
         if (GL === undefined) {
             GL = context;
         }
+        // Texture bindings and sampler uniforms set while the renderer draws a pass; skipped
+        // when unchanged (see trackBindings). Undefined: not tracked, always set.
+        this.textureBindings = undefined;
+        this.samplerUniforms = undefined;
+        this.activeUnit = undefined;
+    }
+
+    /**
+     * Starts (true) or stops (false) skipping redundant texture binds. Only valid while all
+     * texture binds go through bindTextureUnit, i.e. during the renderer's draw loops.
+     */
+    trackBindings(enabled) {
+        this.textureBindings = enabled ? new Map() : undefined;
+        this.samplerUniforms = enabled ? new Map() : undefined;
+        this.activeUnit = undefined;
+    }
+
+    bindTextureUnit(unit, target, texture) {
+        const bindings = this.textureBindings;
+        if (bindings !== undefined) {
+            const key = unit * 0x10000 + target;
+            if (bindings.get(key) === texture) {
+                return;
+            }
+            bindings.set(key, texture);
+        }
+        if (bindings === undefined || this.activeUnit !== unit) {
+            this.context.activeTexture(GL.TEXTURE0 + unit);
+            this.activeUnit = bindings === undefined ? undefined : unit;
+        }
+        this.context.bindTexture(target, texture);
+    }
+
+    setSamplerUniform(loc, unit) {
+        const uniforms = this.samplerUniforms;
+        if (uniforms !== undefined) {
+            if (uniforms.get(loc) === unit) {
+                return;
+            }
+            uniforms.set(loc, unit);
+        }
+        this.context.uniform1i(loc, unit);
     }
 
     loadWebGlExtensions() {
@@ -159,18 +201,21 @@ class gltfWebGl {
             }
         }
 
-        this.context.activeTexture(GL.TEXTURE0 + texSlot);
-        this.context.bindTexture(
-            gltfTex.type,
-            textureInfo.linear ? gltfTex.glTexture : gltfTex.glTextureSRGB
-        );
-
-        this.context.uniform1i(loc, texSlot);
+        const glTexture = textureInfo.linear ? gltfTex.glTexture : gltfTex.glTextureSRGB;
+        this.bindTextureUnit(texSlot, gltfTex.type, glTexture);
+        this.setSamplerUniform(loc, texSlot);
 
         if (
             (!gltfTex.initialized && textureInfo.linear) ||
             (!gltfTex.initializedSRGB && !textureInfo.linear)
         ) {
+            // the upload below targets the texture bound to the active unit
+            this.context.activeTexture(GL.TEXTURE0 + texSlot);
+            this.context.bindTexture(gltfTex.type, glTexture);
+            if (this.activeUnit !== undefined) {
+                this.activeUnit = texSlot;
+            }
+
             const gltfSampler = gltf.samplers[gltfTex.sampler];
 
             if (gltfSampler === undefined) {
