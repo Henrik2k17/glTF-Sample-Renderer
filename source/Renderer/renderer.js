@@ -44,7 +44,8 @@ const NoHighlightColor = vec4.fromValues(0, 0, 0, 0);
 const PickingNodeMask = 0xffffff;
 
 // Texel that makes a texture slot behave as if the texture was absent, for textures switched
-// off in a material debugger (textureInfo.debugDisabled). White suits factors that multiply.
+// off in a material debugger (textureInfo.debugDisabled) or whose image is missing.
+// White suits factors that multiply.
 const NeutralTexels = {
     u_NormalSampler: [128, 128, 255, 255],
     u_ClearcoatNormalSampler: [128, 128, 255, 255],
@@ -744,7 +745,7 @@ class gltfRenderer {
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
-    /** Binds a 1x1 texture that stands in for a switched off texture, see NeutralTexels. */
+    /** Binds a 1x1 texture that stands in for a switched off or missing texture, see NeutralTexels. */
     bindNeutralTexture(location, samplerName, textureUnit) {
         const gl = this.webGl.context;
         const texel = NeutralTexels[samplerName] ?? WhiteTexel;
@@ -2294,6 +2295,12 @@ class gltfRenderer {
             }
             if (!this.webGl.setTexture(location, state.gltf, info, textureIndex))
             {
+                // Missing or unusable image: without a texture of its own, the unit would keep
+                // whatever was bound before (possibly the render target -> feedback loop, draw dropped).
+                if (location !== null)
+                {
+                    this.bindNeutralTexture(location, info.samplerName, textureIndex);
+                }
                 continue;
             }
             if (msfsClamp?.textures.has(info))
