@@ -1,6 +1,7 @@
 import { generateTangentsInWorkers } from "../gltf/tangent_workers.js";
 import { decodeMsfsCompiledGeometry, rebindMsfsSkins } from "../gltf/msfs_compiled.js";
 import { isMsfsAsset } from "../gltf/msfs.js";
+import { addAnimatedMsfsMaterialExtensions } from "../gltf/msfs_material.js";
 import { gltfWebGl } from "../Renderer/webgl.js";
 
 class gltfLoader {
@@ -31,6 +32,8 @@ class gltfLoader {
         if (isMsfsAsset(gltf)) {
             // MSFS skins bind to the rest pose (see rebindMsfsSkins)
             rebindMsfsSkins(gltf);
+            // materials animated through MSFS extensions they lack
+            addAnimatedMsfsMaterialExtensions(gltf);
         }
         // Texture files wait as Blobs until uploadDeferredImages (see gltfImage.setImageFromBlob)
         gltf.deferImageData = typeof Blob !== "undefined" && webGlContext !== undefined;

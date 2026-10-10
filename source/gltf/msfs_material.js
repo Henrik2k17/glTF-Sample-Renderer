@@ -81,6 +81,40 @@ function fromJsonMsfsMaterialExtensions(material, jsonExtensions) {
     }
 }
 
+const AnimatedExtensionPointer = /^\/materials\/(\d+)\/extensions\/(ASOBO_material_\w+)\//;
+
+/**
+ * Adds the animatable MSFS extensions that animations target but the material lacks (e.g. the
+ * DA62 C_Tire_Blurred, whose UV offset is animated without ASOBO_material_UV_options), so the
+ * animation finds its property. Defaults are neutral: an identity UV transform (tiling 1, not
+ * the exporter's omitted-means-0), no dirt, no mud/dust. Call before gltf.initGl.
+ */
+function addAnimatedMsfsMaterialExtensions(gltf) {
+    for (const animation of gltf.animations ?? []) {
+        for (const channel of animation.channels ?? []) {
+            const pointer = channel.target?.extensions?.KHR_animation_pointer?.pointer;
+            const match = AnimatedExtensionPointer.exec(pointer ?? "");
+            const ExtensionClass = AnimatableExtensions[match?.[2]];
+            const material = gltf.materials?.[Number(match?.[1])];
+            if (ExtensionClass === undefined || material === undefined) {
+                continue;
+            }
+            material.extensions ??= {};
+            if (material.extensions[match[2]] !== undefined) {
+                continue;
+            }
+            const extension = new ExtensionClass();
+            extension.json = {};
+            extension.addedForAnimation = true;
+            if (extension instanceof ASOBO_material_UV_options) {
+                extension.UVTilingU = 1;
+                extension.UVTilingV = 1;
+            }
+            material.extensions[match[2]] = extension;
+        }
+    }
+}
+
 /**
  * The UV0 transform of core.fx transformUV, in glTF UV space (V down; 3ds Max adds 1 to its
  * V-up coordinates for the same). Rotation is in degrees around the texture centre and is
@@ -322,6 +356,7 @@ function updateMsfsMaterialUniforms(shader, material) {
 }
 
 export {
+    addAnimatedMsfsMaterialExtensions,
     fromJsonMsfsMaterialExtensions,
     getMsfsUV0Transform,
     getMsfsClampedTextures,
