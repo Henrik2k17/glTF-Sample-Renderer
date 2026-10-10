@@ -10,7 +10,10 @@ import {
     isBlockCompressedKtx2,
     decodeBlockCompressedKtx2,
     describeBlockCompressedKtx2,
-    Ktx2HeaderBytes
+    Ktx2HeaderBytes,
+    skippedMipLevels,
+    limitedImageSize,
+    downsampleRgba
 } from "../ResourceLoader/image_decoders.js";
 
 class gltfImage extends GltfObject {
@@ -212,6 +215,52 @@ class gltfImage extends GltfObject {
         } else {
             this.image = await gltfImage.loadBrowserImage(blob);
         }
+        await this.limitSize(gltf);
+    }
+
+    /**
+     * Shrinks this.image to gltf.maxTextureSize (largest width or height; 0 or undefined: no
+     * limit), e.g. to fit an MSFS package's textures (~4 GB) into GPU memory. Block-compressed
+     * images lose their larger mip levels, so they look like the full texture seen from further
+     * away; browser images are resized (Chrome keeps the colour of transparent texels), RGBA8
+     * data is box filtered. Compressed images without mip levels stay as they are.
+     */
+    async limitSize(gltf) {
+        const maxSize = gltf.maxTextureSize ?? 0;
+        const image = this.image;
+        if (
+            !(maxSize > 0) ||
+            image === undefined ||
+            image.released ||
+            Math.max(image.width, image.height) <= maxSize
+        ) {
+            return;
+        }
+        if (image.compressed?.levels !== undefined) {
+            const levels = image.compressed.levels;
+            const skip = skippedMipLevels(levels[0].width, levels[0].height, levels.length, maxSize);
+            if (skip > 0) {
+                image.compressed.levels = levels.slice(skip);
+                image.width = levels[skip].width;
+                image.height = levels[skip].height;
+            }
+        } else if (
+            typeof createImageBitmap !== "undefined" &&
+            ((typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap) ||
+                (typeof HTMLImageElement !== "undefined" && image instanceof HTMLImageElement))
+        ) {
+            const [width, height] = limitedImageSize(image.width, image.height, maxSize);
+            this.image = await createImageBitmap(image, {
+                resizeWidth: width,
+                resizeHeight: height,
+                resizeQuality: "high",
+                premultiplyAlpha: "none",
+                colorSpaceConversion: "default"
+            });
+            image.close?.();
+        } else if (image.data instanceof Uint8Array && image.data.length === image.width * image.height * 4) {
+            this.image = downsampleRgba(image, maxSize);
+        }
     }
 
     /**
@@ -229,10 +278,12 @@ class gltfImage extends GltfObject {
         if (this.mimeType === ImageMimeType.KTX2) {
             // MSFS textures: size and format are in the header; no need to read the file twice
             const header = new Uint8Array(await blob.slice(0, Ktx2HeaderBytes).arrayBuffer());
-            const description = describeBlockCompressedKtx2(header, blob.size);
-            if (description !== undefined) {
+            const { byteCount, ...description } =
+                describeBlockCompressedKtx2(header, blob.size, gltf.maxTextureSize) ?? {};
+            if (byteCount !== undefined) {
                 this.image = { ...description, released: true };
-                this.deferredSource = blob;
+                // levels above the size limit are at the end of the file
+                this.deferredSource = byteCount < blob.size ? blob.slice(0, byteCount) : blob;
                 return true;
             }
         }
@@ -240,7 +291,8 @@ class gltfImage extends GltfObject {
             // the size is in the header (IHDR); no need to decode the image twice
             const header = new DataView(await blob.slice(0, 24).arrayBuffer());
             if (header.byteLength === 24 && header.getUint32(12) === 0x49484452) {
-                this.image = { width: header.getUint32(16), height: header.getUint32(20), released: true };
+                const [width, height] = limitedImageSize(header.getUint32(16), header.getUint32(20), gltf.maxTextureSize);
+                this.image = { width, height, released: true };
                 this.deferredSource = blob;
                 return true;
             }
@@ -273,7 +325,7 @@ class gltfImage extends GltfObject {
      * (MSFS packages), which was slow.
      * @returns {Promise<boolean>} whether the image was described; throws if the URL fails
      */
-    async describeFromUrl(url) {
+    async describeFromUrl(gltf, url) {
         const headerBytes =
             this.mimeType === ImageMimeType.KTX2 ? Ktx2HeaderBytes : this.mimeType === ImageMimeType.PNG ? 24 : 0;
         if (headerBytes === 0) {
@@ -296,19 +348,25 @@ class gltfImage extends GltfObject {
               ? contentLength
               : Number.MAX_SAFE_INTEGER;
         let description = undefined;
+        let byteCount = undefined;
         if (this.mimeType === ImageMimeType.KTX2) {
-            description = describeBlockCompressedKtx2(header, fileSize);
+            description = describeBlockCompressedKtx2(header, fileSize, gltf.maxTextureSize);
+            if (description !== undefined) {
+                ({ byteCount, ...description } = description);
+            }
         } else if (header.byteLength === 24) {
             const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
             if (view.getUint32(12) === 0x49484452) {
-                description = { width: view.getUint32(16), height: view.getUint32(20) };
+                const [width, height] = limitedImageSize(view.getUint32(16), view.getUint32(20), gltf.maxTextureSize);
+                description = { width, height };
             }
         }
         if (description === undefined) {
             return false;
         }
         this.image = { ...description, released: true };
-        this.deferredSource = { url };
+        // KTX2 levels above the size limit are at the end of the file: no need to download them
+        this.deferredSource = { url, byteCount: byteCount < fileSize ? byteCount : undefined };
         return true;
     }
 
@@ -350,7 +408,8 @@ class gltfImage extends GltfObject {
             await this.decodeBlob(gltf, source);
             return true;
         }
-        const response = await fetch(source.url);
+        const headers = source.byteCount === undefined ? undefined : { Range: `bytes=0-${source.byteCount - 1}` };
+        const response = await fetch(source.url, { headers });
         if (!response.ok) {
             throw new Error(`Could not load image from ${source.url}`);
         }
@@ -368,7 +427,7 @@ class gltfImage extends GltfObject {
      */
     async setKtx2FromBytes(gltf, array) {
         if (isBlockCompressedKtx2(array)) {
-            this.image = decodeBlockCompressedKtx2(array);
+            this.image = decodeBlockCompressedKtx2(array, gltf.maxTextureSize);
         } else if (gltf.ktxDecoder !== undefined) {
             this.image = await gltf.ktxDecoder.loadKtxFromBuffer(array);
         } else {
@@ -402,6 +461,7 @@ class gltfImage extends GltfObject {
             return false;
         }
 
+        await this.limitSize(gltf);
         return true;
     }
 
@@ -548,7 +608,7 @@ class gltfImage extends GltfObject {
         }
 
         if (gltfImage.isBlobDecodable(this.mimeType) && typeof Blob !== "undefined") {
-            if (gltf.deferImageData && (await this.describeFromUrl(fullPath))) {
+            if (gltf.deferImageData && (await this.describeFromUrl(gltf, fullPath))) {
                 return true;
             }
             const response = await fetch(fullPath);

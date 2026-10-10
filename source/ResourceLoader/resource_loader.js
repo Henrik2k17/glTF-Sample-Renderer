@@ -39,6 +39,11 @@ class ResourceLoader {
          * fetchable: async (uri) => [fileName, Blob] | undefined. E.g. a search in texture folders.
          */
         this.textureFileResolver = undefined;
+        /**
+         * Largest texture width or height to load (0: no limit). Larger textures are shrunk while
+         * loading (see gltfImage.limitSize); applies to glTFs loaded afterwards.
+         */
+        this.maxTextureSize = 0;
     }
 
     /**
@@ -118,6 +123,7 @@ class ResourceLoader {
         gltf.ktxDecoder = this.view.ktxDecoder;
         gltf.moptDecoder = MeshoptDecoder;
         gltf.textureFileResolver = this.textureFileResolver;
+        gltf.maxTextureSize = this.maxTextureSize;
         //Make sure draco decoder instance is ready
         gltf.fromJson(json);
 

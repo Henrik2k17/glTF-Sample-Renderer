@@ -60,11 +60,72 @@ function isBlockCompressedKtx2(bytes) {
 }
 
 /**
+ * Number of leading mip levels to leave out so that the largest remaining one fits maxSize
+ * (0: no limit). At least the last level stays.
+ */
+function skippedMipLevels(width, height, levelCount, maxSize) {
+    let skip = 0;
+    if (maxSize > 0) {
+        while (skip < levelCount - 1 && Math.max(width >> skip, height >> skip) > maxSize) {
+            skip++;
+        }
+    }
+    return skip;
+}
+
+/** Size of the largest mip level (halving, as mip levels do) that fits maxSize (0: no limit). */
+function limitedImageSize(width, height, maxSize) {
+    let level = 0;
+    if (maxSize > 0) {
+        while (Math.max(width >> level, height >> level) > maxSize) {
+            level++;
+        }
+    }
+    return [Math.max(1, width >> level), Math.max(1, height >> level)];
+}
+
+/**
+ * Halves an RGBA8 image (see top of file) with a 2x2 box filter until it fits maxSize.
+ * @returns {object} The image itself if it fits, else a new one.
+ */
+function downsampleRgba(image, maxSize) {
+    let { width, height, data } = image;
+    while (Math.max(width, height) > maxSize) {
+        const w = Math.max(1, width >> 1);
+        const h = Math.max(1, height >> 1);
+        const out = new Uint8Array(w * h * 4);
+        for (let y = 0; y < h; y++) {
+            const y0 = Math.min(2 * y, height - 1);
+            const y1 = Math.min(2 * y + 1, height - 1);
+            for (let x = 0; x < w; x++) {
+                const x0 = Math.min(2 * x, width - 1);
+                const x1 = Math.min(2 * x + 1, width - 1);
+                const a = (y0 * width + x0) * 4;
+                const b = (y0 * width + x1) * 4;
+                const c = (y1 * width + x0) * 4;
+                const d = (y1 * width + x1) * 4;
+                const o = (y * w + x) * 4;
+                for (let i = 0; i < 4; i++) {
+                    out[o + i] = (data[a + i] + data[b + i] + data[c + i] + data[d + i] + 2) >> 2;
+                }
+            }
+        }
+        width = w;
+        height = h;
+        data = out;
+    }
+    return data === image.data ? image : { width, height, data };
+}
+
+/**
  * Decodes a block-compressed KTX2 file (see isBlockCompressedKtx2). 2D textures only.
+ * Mip levels larger than maxSize are left out; KTX2 stores the smallest level first, so
+ * bytes may end after the largest level kept (see describeBlockCompressedKtx2's byteCount).
  * @param {Uint8Array} bytes
+ * @param {number} [maxSize] - Largest width or height to keep (0: all levels).
  * @returns {object} A decoded image (see top of file).
  */
-function decodeBlockCompressedKtx2(bytes) {
+function decodeBlockCompressedKtx2(bytes, maxSize = 0) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const format = VkFormats[view.getUint32(12, true)];
     const width = view.getUint32(20, true);
@@ -77,7 +138,8 @@ function decodeBlockCompressedKtx2(bytes) {
     }
     const levelCount = Math.max(1, view.getUint32(40, true));
     const levels = [];
-    for (let level = 0; level < levelCount; level++) {
+    const skip = skippedMipLevels(width, height, levelCount, maxSize);
+    for (let level = skip; level < levelCount; level++) {
         // Level index: byteOffset, byteLength, uncompressedByteLength (uint64 each), level 0 first
         const entry = 80 + level * 24;
         const offset = Number(view.getBigUint64(entry, true));
@@ -94,7 +156,7 @@ function decodeBlockCompressedKtx2(bytes) {
     if (levels.length === 0) {
         throw new Error("KTX2 file contains no image data");
     }
-    return { width, height, compressed: { format, levels } };
+    return { width: levels[0].width, height: levels[0].height, compressed: { format, levels } };
 }
 
 /** Bytes describeBlockCompressedKtx2 needs: the header and the index of up to 16 levels. */
@@ -105,10 +167,12 @@ const Ktx2HeaderBytes = 80 + 16 * 24;
  * its first Ktx2HeaderBytes bytes, without reading the image data.
  * @param {Uint8Array} header
  * @param {number} fileSize
- * @returns {object | undefined} { width, height, compressed: { format, byteLength } }, or
+ * @param {number} [maxSize] - As in decodeBlockCompressedKtx2: levels larger than this are left out.
+ * @returns {object | undefined} { width, height, compressed: { format, byteLength }, byteCount }
+ *   with byteCount = the bytes from the start of the file decodeBlockCompressedKtx2 needs, or
  *   undefined if the file isn't a block-compressed 2D KTX2 file
  */
-function describeBlockCompressedKtx2(header, fileSize) {
+function describeBlockCompressedKtx2(header, fileSize, maxSize = 0) {
     if (!isBlockCompressedKtx2(header)) {
         return undefined;
     }
@@ -116,9 +180,13 @@ function describeBlockCompressedKtx2(header, fileSize) {
     if (view.getUint32(28, true) > 1 || view.getUint32(32, true) > 1 || view.getUint32(36, true) > 1) {
         return undefined; // not 2D: decodeBlockCompressedKtx2 reports the error
     }
+    const width = view.getUint32(20, true);
+    const height = Math.max(1, view.getUint32(24, true));
     const levelCount = Math.max(1, view.getUint32(40, true));
+    const skip = skippedMipLevels(width, height, levelCount, maxSize);
     let byteLength = 0;
-    for (let level = 0; level < levelCount; level++) {
+    let byteCount = 0;
+    for (let level = skip; level < levelCount; level++) {
         const entry = 80 + level * 24;
         if (entry + 16 > header.byteLength) {
             return undefined;
@@ -129,14 +197,16 @@ function describeBlockCompressedKtx2(header, fileSize) {
             break; // truncated file, as in decodeBlockCompressedKtx2
         }
         byteLength += length;
+        byteCount = Math.max(byteCount, offset + length);
     }
     if (byteLength === 0) {
         return undefined;
     }
     return {
-        width: view.getUint32(20, true),
-        height: Math.max(1, view.getUint32(24, true)),
-        compressed: { format: VkFormats[view.getUint32(12, true)], byteLength }
+        width: Math.max(1, width >> skip),
+        height: Math.max(1, height >> skip),
+        compressed: { format: VkFormats[view.getUint32(12, true)], byteLength },
+        byteCount
     };
 }
 
@@ -458,6 +528,9 @@ export {
     decodeBlockCompressedKtx2,
     describeBlockCompressedKtx2,
     Ktx2HeaderBytes,
+    skippedMipLevels,
+    limitedImageSize,
+    downsampleRgba,
     isDecodedImageType,
     decodeImageBytes,
     decodeDds,
