@@ -4,6 +4,9 @@ import { GL } from "../Renderer/webgl.js";
 import { ResourceLoader } from "../ResourceLoader/resource_loader.js";
 import { TextureReader } from "../Renderer/texture_reader.js";
 import { FrameProfiler } from "../Renderer/frame_profiler.js";
+import { gltfMaterial } from "../gltf/material.js";
+import { addAnimatedMsfsMaterialExtensions } from "../gltf/msfs_material.js";
+import { gltfLoader } from "../ResourceLoader/loader.js";
 
 /**
  * GltfView represents a view on a gltf, e.g. in a canvas
@@ -70,6 +73,32 @@ class GltfView {
         }
         this.textureReader ??= new TextureReader(this.renderer.webGl);
         return this.textureReader.read(state.gltf, textureIndex, maxSize);
+    }
+
+    /**
+     * Replaces a material of the loaded glTF with one built from glTF material JSON, e.g. for a
+     * material editor. Textures the new material uses that were not uploaded yet are uploaded;
+     * the draw lists are rebuilt (alpha mode or MSFS material type may have changed).
+     * A texture whose image data was already released after upload can only be used again in
+     * the same color space (linear / sRGB) it was uploaded in.
+     * @param {GltfState} state
+     * @param {number} materialIndex
+     * @param {object} json glTF material JSON (texture indices into state.gltf.textures)
+     */
+    async replaceMaterial(state, materialIndex, json) {
+        const gltf = state.gltf;
+        if (gltf?.materials[materialIndex] === undefined) {
+            return;
+        }
+        const material = new gltfMaterial();
+        material.fromJson(structuredClone(json));
+        material.gltfObjectIndex = materialIndex;
+        gltf.materials[materialIndex] = material;
+        // materials animated through MSFS extensions they lack (see the loader)
+        addAnimatedMsfsMaterialExtensions(gltf);
+        material.initGl(gltf, this.context);
+        await gltfLoader.uploadDeferredImages(gltf, this.context);
+        state.materialsVersion = (state.materialsVersion ?? 0) + 1;
     }
 
     /**

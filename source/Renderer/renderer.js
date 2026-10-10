@@ -811,6 +811,7 @@ class gltfRenderer {
             params.showMsfsInvisibleMaterials === this.showMsfsInvisibleMaterials &&
             state.isolatedMaterialIndices === this.isolatedMaterialIndices &&
             state.hiddenMaterialIndices === this.hiddenMaterialIndices &&
+            state.materialsVersion === this.materialsVersion &&
             state.gltf === this.drawablesGltf;
         const nodesChanged = !sameNodes(this.nodes, newNodes.nodes);
 
@@ -840,6 +841,7 @@ class gltfRenderer {
         this.showMsfsInvisibleMaterials = params.showMsfsInvisibleMaterials;
         this.isolatedMaterialIndices = state.isolatedMaterialIndices;
         this.hiddenMaterialIndices = state.hiddenMaterialIndices;
+        this.materialsVersion = state.materialsVersion;
         this.drawablesGltf = state.gltf;
 
         // collect drawables by essentially zipping primitives (for geometry and material)

@@ -124,6 +124,8 @@ class ResourceLoader {
         gltf.moptDecoder = MeshoptDecoder;
         gltf.textureFileResolver = this.textureFileResolver;
         gltf.maxTextureSize = this.maxTextureSize;
+        // The materials as in the file, for material editors (fromJson translates MSFS materials)
+        gltf.sourceMaterialsJson = structuredClone(json.materials ?? []);
         //Make sure draco decoder instance is ready
         gltf.fromJson(json);
 

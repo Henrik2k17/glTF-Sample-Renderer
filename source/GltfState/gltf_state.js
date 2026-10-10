@@ -74,6 +74,8 @@ class GltfState {
 
         /** Primitives with one of these material indices are neither drawn nor pickable. Assign a new set to apply changes. */
         this.hiddenMaterialIndices = new Set();
+        /** Increased when materials are replaced (GltfView.replaceMaterial): draw lists are rebuilt */
+        this.materialsVersion = 0;
 
         /* the physics controller allows selecting and controlling different physics engines */
         this.physicsController = new PhysicsController();
