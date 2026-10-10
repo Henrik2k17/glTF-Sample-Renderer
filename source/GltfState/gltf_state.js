@@ -161,6 +161,8 @@ class GltfState {
             floatingPointFramebuffer: true,
             /** Render MSFS helper geometry (ASOBO_material_invisible), e.g. collision shells */
             showMsfsInvisibleMaterials: false,
+            /** Skip primitives whose bounding box is outside the view frustum */
+            frustumCulling: true,
             /** Use the MSFS night emissive multipliers (ASOBO_material_emissive) instead of the day ones */
             msfsNightLighting: false,
             /** Linear RGB tint for highlightedNodeIndices */

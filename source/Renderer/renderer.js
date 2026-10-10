@@ -37,6 +37,7 @@ import {
 import { jsToGl, stringHash } from "../gltf/utils.js";
 import { getMsfsClampedTextures, updateMsfsMaterialUniforms } from "../gltf/msfs_material.js";
 import { buildMsfsHelperLines } from "../gltf/msfs_helpers.js";
+import { getFrustumPlanes, isDrawableInFrustum } from "./frustum_culling.js";
 import { gltfMaterial } from "../gltf/material.js";
 
 const NoHighlightColor = vec4.fromValues(0, 0, 0, 0);
@@ -916,6 +917,26 @@ class gltfRenderer {
         );
     }
 
+    /**
+     * Marks drawables outside the view frustum (drawable.culled), unless
+     * renderingParameters.frustumCulling is false. Instanced groups of opaque drawables are
+     * drawn as a whole and not culled.
+     */
+    updateFrustumCulling(state) {
+        const enabled = state.renderingParameters.frustumCulling !== false;
+        const planes = enabled
+            ? getFrustumPlanes(this.viewProjectionMatrix, (this.frustumPlanes ??= new Float32Array(24)))
+            : undefined;
+        let culled = 0;
+        for (const drawable of this.drawables) {
+            drawable.culled = enabled && !isDrawableInFrustum(state.gltf, drawable, planes);
+            if (drawable.culled) {
+                culled++;
+            }
+        }
+        this.profiler?.setCulled(culled, this.drawables.length);
+    }
+
     // render complete gltf scene with given camera
     drawScene(state, scene) {
         const profiler = this.profiler;
@@ -980,6 +1001,7 @@ class gltfRenderer {
         this.prepareFrameDefines(state);
 
         mat4.multiply(this.viewProjectionMatrix, this.projMatrix, this.viewMatrix);
+        this.updateFrustumCulling(state);
 
         // Update skins.
         profileStart = profiler?.now();
@@ -1169,6 +1191,9 @@ class gltfRenderer {
                 ];
                 const instanceOffset = instanceWorldTransforms[drawableCounter];
                 drawableCounter++;
+                if (instance.length === 1 && drawable.culled) {
+                    continue;
+                }
 
                 let sampledTextures = {};
                 if (scatterEnabled) {
@@ -1191,6 +1216,9 @@ class gltfRenderer {
                 currentCamera.sortPrimitivesByDepth(state.gltf, this.transparentDrawables)
             );
             for (const drawable of this.transparentDrawables) {
+                if (drawable.culled) {
+                    continue;
+                }
                 let renderpassConfiguration = {};
                 renderpassConfiguration.linearOutput = true;
                 renderpassConfiguration.transmission = true;
@@ -1332,6 +1360,9 @@ class gltfRenderer {
             renderpassConfiguration.frameBufferSize = [this.currentWidth, this.currentHeight];
             const instanceOffset = instanceWorldTransforms[drawableCounter];
             drawableCounter++;
+            if (instance.length === 1 && drawable.culled) {
+                continue;
+            }
             let sampledTextures = {};
             if (scatterEnabled) {
                 sampledTextures.scatterSampleTexture = this.scatterFrontTexture;
@@ -1353,7 +1384,7 @@ class gltfRenderer {
             state.gltf,
             this.transmissionDrawables
         );
-        for (const drawable of this.transmissionDrawables.filter((a) => a.depth <= 0)) {
+        for (const drawable of this.transmissionDrawables.filter((a) => a.depth <= 0 && !a.culled)) {
             let renderpassConfiguration = {};
             renderpassConfiguration.linearOutput = true;
             renderpassConfiguration.frameBufferSize = [this.currentWidth, this.currentHeight];
@@ -1385,7 +1416,7 @@ class gltfRenderer {
         // immediately composited back into mainFramebuffer before the next
         // drawable is processed.  This preserves correct depth-sorted blending
         // order between splats and regular transparent geometry.
-        for (const drawable of this.transparentDrawables.filter((a) => a.depth <= 0)) {
+        for (const drawable of this.transparentDrawables.filter((a) => a.depth <= 0 && !a.culled)) {
             if (
                 drawable.primitive.extensions?.KHR_gaussian_splatting !== undefined &&
                 state.renderingParameters.enabledExtensions.KHR_gaussian_splatting

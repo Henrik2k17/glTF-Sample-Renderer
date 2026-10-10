@@ -78,6 +78,14 @@ class FrameProfiler {
         }
     }
 
+    /** Drawables skipped by frustum culling this frame, of all drawables. */
+    setCulled(culled, total) {
+        if (this.frame !== undefined) {
+            this.frame.culled = culled;
+            this.frame.drawables = total;
+        }
+    }
+
     countDraw(mode, count, instances = 1) {
         if (this.frame === undefined) {
             return;
