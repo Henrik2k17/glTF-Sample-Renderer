@@ -2160,6 +2160,7 @@ class gltfRenderer {
             shader.lastNode = undefined;
             this.shader.updateUniform("u_ViewProjectionMatrix", viewProjectionMatrix);
             this.shader.updateUniform("u_Exposure", state.renderingParameters.exposure, false);
+            this.shader.updateUniform("u_EmissiveMultiplier", state.renderingParameters.emissiveMultiplier ?? 1, false);
             this.shader.updateUniform("u_Camera", this.currentCameraPosition, false);
             if (!renderpassConfiguration.picking)
             {

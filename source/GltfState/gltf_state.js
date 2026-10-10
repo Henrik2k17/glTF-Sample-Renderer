@@ -167,6 +167,8 @@ class GltfState {
             frustumCulling: true,
             /** Use the MSFS night emissive multipliers (ASOBO_material_emissive) instead of the day ones */
             msfsNightLighting: false,
+            /** Multiplies the emissive of every material (to tune emissive brightness) */
+            emissiveMultiplier: 1,
             /** Linear RGB tint for highlightedNodeIndices */
             highlightColor: [1.0, 0.45, 0.05],
             /** How strongly the highlight tint replaces the shaded colour, 0 to 1 */

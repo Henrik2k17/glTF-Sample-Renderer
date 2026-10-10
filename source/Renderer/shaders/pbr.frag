@@ -522,6 +522,7 @@ void main()
 #elif defined(HAS_EMISSIVE_MAP)
     f_emissive *= texture(u_EmissiveSampler, getEmissiveUV()).rgb;
 #endif
+    f_emissive *= u_EmissiveMultiplier;
 #ifdef MSFS_DECAL_BLEND
     vec3 msfsDecalLit = color;
 #endif

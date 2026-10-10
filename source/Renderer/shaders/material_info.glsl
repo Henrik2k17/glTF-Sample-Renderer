@@ -38,6 +38,8 @@ uniform vec3 u_DiffuseTransmissionColorFactor;
 
 // Emissive Strength
 uniform float u_EmissiveStrength;
+// Global emissive multiplier of the viewer (renderingParameters.emissiveMultiplier)
+uniform float u_EmissiveMultiplier;
 
 // IOR
 uniform float u_Ior;
