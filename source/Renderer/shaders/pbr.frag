@@ -221,6 +221,30 @@ void main()
     clearcoatFresnel = F_Schlick(materialInfo.clearcoatF0, materialInfo.clearcoatF90, clampedDot(materialInfo.clearcoatNormal, v));
 #endif
 
+    // Occlusion (applied to the image based lighting below). Read outside the IBL block so the
+    // occlusion debug outputs also work without IBL.
+    float ao = 1.0;
+#if defined(HAS_OCCLUSION_MAP) && !defined(MSFS_OCCLUSION_IS_EXTRA)
+    ao = texture(u_OcclusionSampler,  getOcclusionUV()).r;
+#endif
+#if defined(MSFS_DETAIL_MAP) && defined(MSFS_DETAIL_COMP_MAP)
+    ao = applyMsfsDetailComp(vec3(ao, 0.0, 0.0)).r;
+#endif
+#ifdef MSFS_EXTRA_OCCLUSION_MAP
+    // ASOBO_extra_occlusion: a second occlusion map, usually on UV2
+    float msfsExtraOcclusion = texture(u_MsfsExtraOcclusionSampler, getTexcoord(u_MsfsExtraOcclusionUVSet)).r;
+#ifdef MSFS_OCCLUSION_IS_EXTRA
+    // Compiled packages: the builder stores the extra occlusion map as sqrt(AO) and points the
+    // occlusion texture at it too; read once and square, the base occlusion counts as 1
+    // (the source's comp map red channel).
+    msfsExtraOcclusion *= msfsExtraOcclusion;
+#endif
+    ao *= msfsExtraOcclusion;
+#if DEBUG == DEBUG_MSFS_EXTRA_OCCLUSION
+    setMsfsDebug(vec3(msfsExtraOcclusion));
+#endif
+#endif
+
     // Calculate lighting contribution from image based lighting source (IBL)
 
 #if defined(USE_IBL) || defined(MATERIAL_TRANSMISSION)
@@ -311,18 +335,6 @@ void main()
     color = mix(color, clearcoat_brdf, clearcoatFactor * clearcoatFresnel);
 
 #if defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP)
-    float ao = 1.0;
-#ifdef HAS_OCCLUSION_MAP
-    ao = texture(u_OcclusionSampler,  getOcclusionUV()).r;
-#endif
-#ifdef MSFS_EXTRA_OCCLUSION_MAP
-    // ASOBO_extra_occlusion: a second occlusion map, usually on UV2
-    float msfsExtraOcclusion = texture(u_MsfsExtraOcclusionSampler, getTexcoord(u_MsfsExtraOcclusionUVSet)).r;
-    ao *= msfsExtraOcclusion;
-#if DEBUG == DEBUG_MSFS_EXTRA_OCCLUSION
-    setMsfsDebug(vec3(msfsExtraOcclusion));
-#endif
-#endif
 #ifdef MSFS_OCCLUSION_STRENGTH
     // ASOBO_occlusion_strength: 0..1 fades the occlusion in, 1..2 darkens towards black
     ao = mix(mix(1.0, ao, clamp(u_OcclusionStrength, 0.0, 1.0)), 0.0, clamp(u_OcclusionStrength - 1.0, 0.0, 1.0));

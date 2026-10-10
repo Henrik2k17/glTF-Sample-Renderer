@@ -211,8 +211,8 @@ function initMsfsMaterial(material, gltf) {
         }
         msfs.detailUVScale = detail.UVScale ?? 1;
         msfs.blendThreshold = detail.blendThreshold ?? 0;
-        // detailMetalRoughAOTexture is not used by the 3ds Max viewport shader, so not for shading
-        // either; it is loaded for the detail occlusion/roughness/metallic debug channels only.
+        // detailMetalRoughAOTexture: added to the base occlusion/roughness/metallic around 0.5 as
+        // the SDK documents it (the 3ds Max viewport shader ignores it); see applyMsfsDetailComp.
         msfs.detailComp = addTexture(material, gltf, detail.detailMetalRoughAOTexture, "u_MsfsDetailCompSampler", true, "MSFS_DETAIL_COMP_MAP 1");
     }
 
@@ -284,6 +284,17 @@ function initMsfsMaterial(material, gltf) {
         true,
         "MSFS_EXTRA_OCCLUSION_MAP 1"
     );
+    // Compiled packages point the occlusion texture at the extra occlusion map (stored as
+    // sqrt(AO)); the shader then reads it once and squares it (see pbr.frag). For any other
+    // glTF with the same map in both slots that is what multiplying the two gave before.
+    const extraJson = ext.ASOBO_extra_occlusion?.extraOcclusionTexture;
+    if (
+        msfs.extraOcclusion !== undefined &&
+        material.occlusionTexture?.index === extraJson?.index &&
+        (material.occlusionTexture?.texCoord ?? 0) === (extraJson?.texCoord ?? 0)
+    ) {
+        material.defines.push("MSFS_OCCLUSION_IS_EXTRA 1");
+    }
 
     // 0..1 fades the occlusion in, 1..2 darkens towards black.
     const occlusionStrength = ext.ASOBO_occlusion_strength?.strength;

@@ -197,8 +197,23 @@ vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha
 #endif
 }
 
-// Debug only: the detail comp texture is not part of the shading (as in the Max viewport).
 #ifdef MSFS_DETAIL_COMP_MAP
+// Detail occlusion (R), roughness (G), metallic (B) as the MSFS 2024 SDK documents it (the Max
+// viewport ignores this map): linear, added to the base values with 0.5 neutral, painted in by
+// vertex alpha (times base color alpha, like the other detail maps). With a blend mask it is
+// the secondary material's occlusion/roughness/metallic instead.
+vec3 applyMsfsDetailComp(vec3 orm)
+{
+    vec3 comp = texture(u_MsfsDetailCompSampler, getMsfsDetailUV(u_MsfsDetailCompUVSet)).rgb;
+    float vertexAlpha = getVertexColor().a;
+#ifdef MSFS_BLEND_MASK
+    return mix(comp, orm, getMsfsBlend(vertexAlpha));
+#else
+    return clamp(orm + (comp - 0.5) * vertexAlpha * getMsfsBaseTextureAlpha(), 0.0, 1.0);
+#endif
+}
+
+// Raw detail comp channels for the debug outputs.
 void captureMsfsDetailCompDebug()
 {
 #if DEBUG == DEBUG_MSFS_DETAIL_OCCLUSION || DEBUG == DEBUG_MSFS_DETAIL_ROUGHNESS || DEBUG == DEBUG_MSFS_DETAIL_METALLIC
@@ -561,6 +576,11 @@ MaterialInfo getMetallicRoughnessInfo(MaterialInfo info)
     info.perceptualRoughness *= mrSample.g;
 #endif
     info.metallic *= mrSample.b;
+#endif
+#if defined(MSFS_DETAIL_MAP) && defined(MSFS_DETAIL_COMP_MAP)
+    vec3 detailOrm = applyMsfsDetailComp(vec3(1.0, info.perceptualRoughness, info.metallic));
+    info.perceptualRoughness = detailOrm.g;
+    info.metallic = detailOrm.b;
 #endif
 
     return info;
