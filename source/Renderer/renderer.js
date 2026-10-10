@@ -2669,6 +2669,8 @@ class gltfRenderer {
                 shaderDefine: "DEBUG_OCCLUSION"
             },
             { debugOutput: GltfState.DebugOutput.generic.EMISSIVE, shaderDefine: "DEBUG_EMISSIVE" },
+            { debugOutput: GltfState.DebugOutput.generic.VERTEX_COLOR, shaderDefine: "DEBUG_VERTEX_COLOR" },
+            { debugOutput: GltfState.DebugOutput.generic.VERTEX_ALPHA, shaderDefine: "DEBUG_VERTEX_ALPHA" },
 
             { debugOutput: GltfState.DebugOutput.mr.BASECOLOR, shaderDefine: "DEBUG_BASE_COLOR" },
             { debugOutput: GltfState.DebugOutput.mr.ROUGHNESS, shaderDefine: "DEBUG_ROUGHNESS" },
@@ -2758,14 +2760,6 @@ class gltfRenderer {
             {
                 debugOutput: GltfState.DebugOutput.msfs.MSFS_UV0_TILED,
                 shaderDefine: "DEBUG_MSFS_UV0_TILED"
-            },
-            {
-                debugOutput: GltfState.DebugOutput.msfs.MSFS_VERTEX_COLOR,
-                shaderDefine: "DEBUG_MSFS_VERTEX_COLOR"
-            },
-            {
-                debugOutput: GltfState.DebugOutput.msfs.MSFS_VERTEX_ALPHA,
-                shaderDefine: "DEBUG_MSFS_VERTEX_ALPHA"
             },
             {
                 debugOutput: GltfState.DebugOutput.msfs.MSFS_DETAIL_COLOR,

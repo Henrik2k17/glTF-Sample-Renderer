@@ -69,7 +69,8 @@ uniform sampler2D u_MsfsRoomSampler;
 uniform vec4 u_MsfsParallax; // room size X, room size Y, depth (parallax scale), rooms per atlas row
 uniform int u_MsfsDrawOrder;
 
-// MSFS debug channels: the value of the selected channel, captured where it is computed.
+// MSFS (and vertex color) debug channels: the value of the selected channel, captured where it
+// is computed.
 // Left unset (checkerboard) where the material does not use the feature.
 vec3 msfsDebugValue = vec3(0.0);
 bool msfsDebugSet = false;

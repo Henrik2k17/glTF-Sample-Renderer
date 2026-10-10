@@ -543,10 +543,10 @@ vec4 getBaseColor()
 #endif
 
     vec4 vertexColor = getVertexColor();
-#if DEBUG == DEBUG_MSFS_VERTEX_COLOR && (defined(HAS_COLOR_0_VEC3) || defined(HAS_COLOR_0_VEC4))
+#if DEBUG == DEBUG_VERTEX_COLOR && (defined(HAS_COLOR_0_VEC3) || defined(HAS_COLOR_0_VEC4))
     setMsfsDebug(vertexColor.rgb);
 #endif
-#if DEBUG == DEBUG_MSFS_VERTEX_ALPHA && defined(HAS_COLOR_0_VEC4)
+#if DEBUG == DEBUG_VERTEX_ALPHA && defined(HAS_COLOR_0_VEC4)
     setMsfsDebug(vec3(vertexColor.a));
 #endif
 #ifdef MSFS_DETAIL_MAP

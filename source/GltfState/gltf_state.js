@@ -213,6 +213,10 @@ GltfState.DebugOutput = {
         UV_COORDS_0: "Texture Coordinates 0",
         /** output the texture coordinates 1 */
         UV_COORDS_1: "Texture Coordinates 1",
+        /** output the vertex color (COLOR_0 rgb) */
+        VERTEX_COLOR: "Vertex Color",
+        /** output the vertex alpha (COLOR_0 a) */
+        VERTEX_ALPHA: "Vertex Alpha",
         /** output the world space normals (i.e. with TBN applied) */
         NORMAL: "Normal Texture",
         /** output the normal from the TBN*/
@@ -227,8 +231,8 @@ GltfState.DebugOutput = {
         WORLDSPACENORMAL: "Shading Normal",
         /** output the alpha value */
         ALPHA: "Alpha",
-        /** output the occlusion value */
-        OCCLUSION: "Occlusion",
+        /** output the occlusion value (occlusion map, MSFS detail and extra occlusion combined) */
+        OCCLUSION: "Occlusion (combined)",
         /** output the emissive value */
         EMISSIVE: "Emissive"
     },
@@ -246,11 +250,11 @@ GltfState.DebugOutput = {
     /** KHR_materials_clearcoat */
     clearcoat: {
         /** output the clear coat strength */
-        CLEARCOAT_FACTOR: "ClearCoat Strength",
+        CLEARCOAT_FACTOR: "MSFS Clear Coat Strength",
         /** output the clear coat roughness */
-        CLEARCOAT_ROUGHNESS: "ClearCoat Roughness",
+        CLEARCOAT_ROUGHNESS: "MSFS Clear Coat Roughness",
         /** output the clear coat normal */
-        CLEARCOAT_NORMAL: "ClearCoat Normal"
+        CLEARCOAT_NORMAL: "MSFS Clear Coat Normal"
     },
 
     /** KHR_materials_sheen */
@@ -288,9 +292,9 @@ GltfState.DebugOutput = {
     /** KHR_materials_iridescence */
     iridescence: {
         /** output the iridescence strength*/
-        IRIDESCENCE_FACTOR: "Iridescence Strength",
+        IRIDESCENCE_FACTOR: "MSFS Iridescent Strength",
         /** output the iridescence thickness*/
-        IRIDESCENCE_THICKNESS: "Iridescence Thickness"
+        IRIDESCENCE_THICKNESS: "MSFS Iridescent Thickness"
     },
 
     /** KHR_materials_retroreflection */
@@ -318,9 +322,7 @@ GltfState.DebugOutput = {
 
     /** MSFS (ASOBO_*) material features, see msfs_material.js */
     msfs: {
-        MSFS_UV0_TILED: "MSFS UV0 (tiled)",
-        MSFS_VERTEX_COLOR: "MSFS Vertex Color",
-        MSFS_VERTEX_ALPHA: "MSFS Vertex Alpha",
+        MSFS_UV0_TILED: "MSFS UV0 with UV Options (wrapped)",
         MSFS_DETAIL_COLOR: "MSFS Detail Color",
         MSFS_DETAIL_MASK: "MSFS Detail Mask / Blend",
         MSFS_DETAIL_NORMAL: "MSFS Detail Normal",
