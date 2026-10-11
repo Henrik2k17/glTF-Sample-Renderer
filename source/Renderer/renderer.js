@@ -768,7 +768,7 @@ class gltfRenderer {
     }
 
     /** MSFS helper geometry, hidden materials and, while materials are isolated, all other materials are hidden. */
-    isHiddenPrimitive(state, primitive) {
+    isHiddenPrimitive(state, primitive, msfsInvisible = true) {
         if (state.hiddenMaterialIndices?.has(primitive.material)) {
             return true;
         }
@@ -778,7 +778,7 @@ class gltfRenderer {
         ) {
             return true;
         }
-        return isMsfsHiddenPrimitive(state.gltf, primitive, state.renderingParameters);
+        return msfsInvisible && isMsfsHiddenPrimitive(state.gltf, primitive, state.renderingParameters);
     }
 
     /** Drawables ({ node, primitive, primitiveIndex }) of the primitives of the given nodes. */
@@ -813,18 +813,27 @@ class gltfRenderer {
             state.hiddenMaterialIndices === this.hiddenMaterialIndices &&
             state.materialsVersion === this.materialsVersion &&
             state.gltf === this.drawablesGltf;
+        const samePickable = state.pickingNodeIndices === this.pickingNodeIndices;
         const nodesChanged = !sameNodes(this.nodes, newNodes.nodes);
 
         if (
             !sameFilters ||
+            !samePickable ||
             nodesChanged ||
             !sameNodes(this.selectableNodes, newNodes.selectableNodes) ||
             !sameNodes(this.hoverableNodes, newNodes.hoverableNodes)
         ) {
             // Nodes hidden with KHR_node_visibility can't be picked either.
             const visibleNodes = new Set(newNodes.nodes);
+            // With state.pickingNodeIndices only those nodes, MSFS invisible primitives included.
+            const pickingNodes = state.pickingNodeIndices;
             const pickable = (node, primitive) =>
-                visibleNodes.has(node) && !this.isHiddenPrimitive(state, primitive);
+                visibleNodes.has(node) &&
+                (pickingNodes === undefined
+                    ? !this.isHiddenPrimitive(state, primitive)
+                    : pickingNodes.has(node.gltfObjectIndex) &&
+                      !this.isHiddenPrimitive(state, primitive, false));
+            this.pickingNodeIndices = pickingNodes;
             this.selectableNodes = newNodes.selectableNodes;
             this.hoverableNodes = newNodes.hoverableNodes;
             this.selectionDrawables = this.collectDrawables(state, newNodes.selectableNodes, pickable);

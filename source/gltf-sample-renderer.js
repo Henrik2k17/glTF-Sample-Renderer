@@ -8,6 +8,8 @@ import { ResourceLoaderUtils } from "./ResourceLoader/loader_utils.js";
 
 import { isMsfsAsset, detectMsfsFrameRate } from "./gltf/msfs.js";
 
-const Msfs = { isMsfsAsset, detectMsfsFrameRate };
+import { getNodeExtents } from "./gltf/gltf_utils.js";
+
+const Msfs = { isMsfsAsset, detectMsfsFrameRate, getNodeExtents };
 
 export { GltfView, GltfState, ResourceLoader, ResourceLoaderUtils, Msfs };

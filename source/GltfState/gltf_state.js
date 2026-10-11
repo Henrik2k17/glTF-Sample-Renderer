@@ -69,6 +69,14 @@ class GltfState {
         /** Indices of materials whose primitives are drawn with the highlight tint, e.g. in a material debugger */
         this.highlightedMaterialIndices = new Set();
 
+        /**
+         * When set, only the primitives of these nodes can be picked (selection and hover),
+         * also MSFS invisible ones (ASOBO_material_invisible) that are not drawn, e.g. the mouse
+         * rect meshes of model behaviors. Replace the set (don't change it in place) so the
+         * renderer notices.
+         */
+        this.pickingNodeIndices = undefined;
+
         /** If set, only primitives with one of these material indices are drawn and pickable */
         this.isolatedMaterialIndices = undefined;
 
