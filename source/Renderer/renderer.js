@@ -2641,10 +2641,17 @@ class gltfRenderer {
             case GltfState.ToneMaps.ACES_HILL_EXPOSURE_BOOST:
                 fragDefines.push("TONEMAP_ACES_HILL_EXPOSURE_BOOST 1");
                 break;
+            case GltfState.ToneMaps.MSFS_SDR:
+                fragDefines.push("TONEMAP_MSFS_SDR 1");
+                break;
             case GltfState.ToneMaps.NONE:
             default:
                 fragDefines.push("TONEMAP_NONE 1");
                 break;
+        }
+
+        if (state.renderingParameters.msfsF0Fade) {
+            fragDefines.push("MSFS_F0_FADE 1");
         }
 
         let debugOutputMapping = [

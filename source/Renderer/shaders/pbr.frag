@@ -167,6 +167,12 @@ void main()
     // convert to material roughness by squaring the perceptual roughness.
     materialInfo.alphaRoughness = materialInfo.perceptualRoughness * materialInfo.perceptualRoughness;
 
+#ifdef MSFS_F0_FADE
+    // MSFS: the dielectric reflectance at normal incidence fades out above roughness 0.5,
+    // F0 * (1 - saturate(2r - 1)) (shader pack, ch_compute_illumination)
+    materialInfo.f0_dielectric *= 1.0 - clamp(2.0 * materialInfo.perceptualRoughness - 1.0, 0.0, 1.0);
+#endif
+
 
     // LIGHTING
     vec3 f_specular_dielectric = vec3(0.0);

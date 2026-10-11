@@ -84,6 +84,25 @@ vec3 toneMapACES_Hill(vec3 color)
     return color;
 }
 
+// MSFS 2024 SDR display curve (shader pack, tonemapping): per channel, linear up to 0.22, then
+// a soft roll-off towards 1. The sim grades with a 3D LUT and tonemaps locally before it.
+#ifdef TONEMAP_MSFS_SDR
+const float MSFS_SDR_KNEE = 0.22;
+const float MSFS_SDR_SLOPE = 1.849609;
+
+vec3 toneMapMsfsSdr(vec3 color)
+{
+    vec3 rolled = MSFS_SDR_KNEE + (1.0 - MSFS_SDR_KNEE) * (1.0 - exp(-MSFS_SDR_SLOPE * (color - MSFS_SDR_KNEE)));
+    return mix(color, rolled, step(MSFS_SDR_KNEE, color));
+}
+
+vec3 toneMapMsfsSdrInverse(vec3 color)
+{
+    vec3 unrolled = MSFS_SDR_KNEE - log(max(1.0 - (color - MSFS_SDR_KNEE) / (1.0 - MSFS_SDR_KNEE), 1e-6)) / MSFS_SDR_SLOPE;
+    return mix(color, unrolled, step(MSFS_SDR_KNEE, color));
+}
+#endif
+
 // Khronos PBR neutral tone mapping
 #ifdef TONEMAP_KHR_PBR_NEUTRAL
 vec3 toneMap_KhronosPbrNeutral( vec3 color )
@@ -129,6 +148,10 @@ vec3 toneMap(vec3 color)
 
 #ifdef TONEMAP_KHR_PBR_NEUTRAL
     color = toneMap_KhronosPbrNeutral(color);
+#endif
+
+#ifdef TONEMAP_MSFS_SDR
+    color = toneMapMsfsSdr(max(color, vec3(0.0)));
 #endif
 
     return linearTosRGB(color);
@@ -245,6 +268,10 @@ vec3 toneMapInverse(vec3 toneMapped)
     // Then undo the specific tonemapping (this would need to match the forward path)
 #ifdef TONEMAP_KHR_PBR_NEUTRAL
     color = toneMap_KhronosPbrNeutralInverse(color);
+#endif
+
+#ifdef TONEMAP_MSFS_SDR
+    color = toneMapMsfsSdrInverse(color);
 #endif
 
 #ifdef TONEMAP_ACES_HILL_EXPOSURE_BOOST

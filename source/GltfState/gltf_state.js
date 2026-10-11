@@ -177,6 +177,8 @@ class GltfState {
             msfsNightLighting: false,
             /** Multiplies the emissive of every material (to tune emissive brightness) */
             emissiveMultiplier: 1,
+            /** Fade the dielectric F0 out above roughness 0.5 like MSFS: F0 * (1 - saturate(2r - 1)) */
+            msfsF0Fade: false,
             /** Linear RGB tint for highlightedNodeIndices */
             highlightColor: [1.0, 0.45, 0.05],
             /** How strongly the highlight tint replaces the shaded colour, 0 to 1 */
@@ -205,6 +207,8 @@ GltfState.ToneMaps = {
     ACES_NARKOWICZ: "ACES Filmic Tone Mapping (Narkowicz)",
     /** more accurate implementation of the ACES sRGB RRT+ODT based on Stephen Hill's implementation*/
     ACES_HILL: "ACES Filmic Tone Mapping (Hill)",
+    /** MSFS 2024's SDR display curve: linear up to 0.22, then a soft roll-off */
+    MSFS_SDR: "MSFS 2024 SDR curve",
     /** Linear mapping, clamped at 1.0 per channel */
     NONE: "None (Linear mapping, clamped at 1.0)"
 };
