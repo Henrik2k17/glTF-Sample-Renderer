@@ -301,9 +301,9 @@ class gltfImage extends GltfObject {
         const content = this.image;
         let placeholder = undefined;
         if (content?.compressed?.levels !== undefined) {
-            const { format, levels } = content.compressed;
+            const { format, levels, container } = content.compressed;
             const byteLength = levels.reduce((sum, level) => sum + level.data.byteLength, 0);
-            placeholder = { width: content.width, height: content.height, compressed: { format, byteLength } };
+            placeholder = { width: content.width, height: content.height, compressed: { format, byteLength, container } };
         } else if (typeof ImageBitmap !== "undefined" && content instanceof ImageBitmap) {
             placeholder = { width: content.width, height: content.height };
             content.close();

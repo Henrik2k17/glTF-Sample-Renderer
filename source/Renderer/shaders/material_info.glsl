@@ -124,6 +124,13 @@ struct MaterialInfo
 
 
 // linearstep of the 3ds Max shaders; with lo == hi (a zero threshold) it is a hard step.
+// Signed (SNORM) normal maps of MSFS 2024 compiled packages store sign(v) * sqrt(|v|) per
+// channel; the sim decodes sign(v) * v^2 (shader pack, ph_base_gbuffer).
+vec2 decodeSignedSquare(vec2 v)
+{
+    return sign(v) * v * v;
+}
+
 float msfsLinearstep(float lo, float hi, float x)
 {
     if (hi - lo < 1e-5)
@@ -200,9 +207,10 @@ vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha
 }
 
 #ifdef MSFS_DETAIL_COMP_MAP
-// Detail occlusion (R), roughness (G), metallic (B) as the MSFS 2024 SDK documents it (the Max
-// viewport ignores this map): linear, added to the base values with 0.5 neutral, painted in by
-// vertex alpha (times base color alpha, like the other detail maps). With a blend mask it is
+// Detail occlusion (R), roughness (G), metallic (B) (the Max viewport ignores this map): a
+// signed offset with 0.5 neutral, comp * 2 - 1, added to the base values (AO after squaring,
+// roughness and metallic after their factors) and painted in by vertex alpha times base color
+// alpha, as the sim's shader does it (shader pack, ph_base_gbuffer). With a blend mask it is
 // the secondary material's occlusion/roughness/metallic instead.
 vec3 applyMsfsDetailComp(vec3 orm)
 {
@@ -211,7 +219,7 @@ vec3 applyMsfsDetailComp(vec3 orm)
 #ifdef MSFS_BLEND_MASK
     return mix(comp, orm, getMsfsBlend(vertexAlpha));
 #else
-    return clamp(orm + (comp - 0.5) * vertexAlpha * getMsfsBaseTextureAlpha(), 0.0, 1.0);
+    return clamp(orm + (comp * 2.0 - 1.0) * vertexAlpha * getMsfsBaseTextureAlpha(), 0.0, 1.0);
 #endif
 }
 
@@ -238,7 +246,7 @@ vec3 applyMsfsDetailNormal(vec3 n)
     vec2 detail = vec2(0.0);
 #ifdef MSFS_DETAIL_NORMAL_MAP
 #ifdef MSFS_DETAIL_NORMAL_SNORM
-    detail = texture(u_MsfsDetailNormalSampler, getMsfsDetailUV(u_MsfsDetailNormalUVSet)).rg;
+    detail = decodeSignedSquare(texture(u_MsfsDetailNormalSampler, getMsfsDetailUV(u_MsfsDetailNormalUVSet)).rg);
 #else
     detail = texture(u_MsfsDetailNormalSampler, getMsfsDetailUV(u_MsfsDetailNormalUVSet)).rg * 2.0 - vec2(1.0);
 #endif
@@ -475,8 +483,9 @@ NormalInfo getNormalInfo(vec3 v)
     info.ntex = vec3(0.0, 0.0, 1.0);
 #ifdef HAS_NORMAL_MAP
 #ifdef NORMAL_MAP_SNORM
-    // signed texture format (e.g. BC5 SNORM in MSFS 2024 compiled KTX2): already -1..1
+    // signed texture format (BC5 SNORM in MSFS 2024 compiled KTX2): -1..1, square-root encoded
     info.ntex = texture(u_NormalSampler, UV).rgb;
+    info.ntex.xy = decodeSignedSquare(info.ntex.xy);
 #else
     info.ntex = texture(u_NormalSampler, UV).rgb * 2.0 - vec3(1.0);
 #endif
@@ -515,6 +524,7 @@ vec3 getClearcoatNormal(NormalInfo normalInfo)
 #ifdef HAS_CLEARCOAT_NORMAL_MAP
 #ifdef CLEARCOAT_NORMAL_MAP_SNORM
     vec3 n = texture(u_ClearcoatNormalSampler, getClearcoatNormalUV()).rgb;
+    n.xy = decodeSignedSquare(n.xy);
 #else
     vec3 n = texture(u_ClearcoatNormalSampler, getClearcoatNormalUV()).rgb * 2.0 - vec3(1.0);
 #endif

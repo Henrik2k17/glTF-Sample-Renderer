@@ -296,6 +296,22 @@ function initMsfsMaterial(material, gltf) {
         material.defines.push("MSFS_OCCLUSION_IS_EXTRA 1");
     }
 
+    // Compiled (KTX2) packages drop the occlusion texture: the sim takes AO from the comp map's
+    // red channel, which the package builder stores as sqrt(AO) and the shader squares (shader
+    // pack, ph_base_gbuffer). Source glTFs carry the comp map in the occlusion slot instead.
+    const compImage = gltf.images[gltf.textures[material.pbrMetallicRoughness?.metallicRoughnessTexture?.index]?.source];
+    if (
+        compImage?.image?.compressed?.container === "ktx2" &&
+        (material.occlusionTexture === undefined || material.defines.includes("MSFS_OCCLUSION_IS_EXTRA 1"))
+    ) {
+        material.defines.push("MSFS_COMP_OCCLUSION 1");
+        // full strength unless ASOBO_occlusion_strength says otherwise (no occlusion texture to
+        // carry glTF's strength)
+        if (material.occlusionTexture === undefined) {
+            msfs.occlusionStrength = 1;
+        }
+    }
+
     // 0..1 fades the occlusion in, 1..2 darkens towards black.
     const occlusionStrength = ext.ASOBO_occlusion_strength?.strength;
     if (occlusionStrength !== undefined) {

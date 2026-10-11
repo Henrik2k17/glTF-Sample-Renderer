@@ -232,7 +232,8 @@ class gltfMaterial extends GltfObject {
         }
 
         // Two channel (BC5) normal maps only store X and Y; signed (SNORM) ones are sampled
-        // as -1..1 already.
+        // as -1..1 already, and store sign(v) * sqrt(|v|) (MSFS 2024 compiled KTX2; the sim
+        // decodes sign(v) * v^2).
         const compressedFormat = (textureInfo) => {
             const texture = gltf.textures[textureInfo?.index];
             return gltf.images[texture?.source]?.image?.compressed?.format;

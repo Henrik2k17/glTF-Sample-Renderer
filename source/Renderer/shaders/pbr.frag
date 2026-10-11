@@ -227,6 +227,11 @@ void main()
 #if defined(HAS_OCCLUSION_MAP) && !defined(MSFS_OCCLUSION_IS_EXTRA)
     ao = texture(u_OcclusionSampler,  getOcclusionUV()).r;
 #endif
+#if defined(MSFS_COMP_OCCLUSION) && defined(HAS_METALLIC_ROUGHNESS_MAP)
+    // compiled packages: the comp map's red channel holds sqrt(AO)
+    ao = texture(u_MetallicRoughnessSampler, getMetallicRoughnessUV()).r;
+    ao *= ao;
+#endif
 #if defined(MSFS_DETAIL_MAP) && defined(MSFS_DETAIL_COMP_MAP)
     ao = applyMsfsDetailComp(vec3(ao, 0.0, 0.0)).r;
 #endif
@@ -334,7 +339,7 @@ void main()
     color = f_sheen + color * albedoSheenScaling;
     color = mix(color, clearcoat_brdf, clearcoatFactor * clearcoatFresnel);
 
-#if defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP)
+#if defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP) || defined(MSFS_COMP_OCCLUSION)
 #ifdef MSFS_OCCLUSION_STRENGTH
     // ASOBO_occlusion_strength: 0..1 fades the occlusion in, 1..2 darkens towards black
     ao = mix(mix(1.0, ao, clamp(u_OcclusionStrength, 0.0, 1.0)), 0.0, clamp(u_OcclusionStrength - 1.0, 0.0, 1.0));
@@ -605,7 +610,7 @@ void main()
 #if DEBUG == DEBUG_ALPHA
     g_finalColor.rgb = vec3(baseColor.a);
 #endif
-#if DEBUG == DEBUG_OCCLUSION && (defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP))
+#if DEBUG == DEBUG_OCCLUSION && (defined(HAS_OCCLUSION_MAP) || defined(MSFS_EXTRA_OCCLUSION_MAP) || defined(MSFS_COMP_OCCLUSION))
     g_finalColor.rgb = vec3(ao);
 #endif
 #if DEBUG == DEBUG_EMISSIVE

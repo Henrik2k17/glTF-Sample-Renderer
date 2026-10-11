@@ -156,7 +156,8 @@ function decodeBlockCompressedKtx2(bytes, maxSize = 0) {
     if (levels.length === 0) {
         throw new Error("KTX2 file contains no image data");
     }
-    return { width: levels[0].width, height: levels[0].height, compressed: { format, levels } };
+    // container: MSFS 2024 compiled packages are KTX2 (their encodings differ, see msfs_material.js)
+    return { width: levels[0].width, height: levels[0].height, compressed: { format, levels, container: "ktx2" } };
 }
 
 /** Bytes describeBlockCompressedKtx2 needs: the header and the index of up to 16 levels. */
@@ -205,7 +206,7 @@ function describeBlockCompressedKtx2(header, fileSize, maxSize = 0) {
     return {
         width: Math.max(1, width >> skip),
         height: Math.max(1, height >> skip),
-        compressed: { format: VkFormats[view.getUint32(12, true)], byteLength },
+        compressed: { format: VkFormats[view.getUint32(12, true)], byteLength, container: "ktx2" },
         byteCount
     };
 }
