@@ -172,6 +172,23 @@ float getMsfsBlend(float vertexAlpha)
 #endif
 }
 
+// How much of the detail maps a pixel gets: base color alpha times vertex alpha (white = full
+// detail, black = none), or with a blend mask the secondary material's share.
+float getMsfsDetailWeight(float vertexAlpha)
+{
+#ifdef MSFS_BLEND_MASK
+    return 1.0 - getMsfsBlend(vertexAlpha);
+#else
+    return vertexAlpha * getMsfsBaseTextureAlpha();
+#endif
+}
+
+// Debug outputs show a detail map where it applies, faded to its neutral value by the weight.
+void setMsfsDetailDebug(vec3 value, vec3 neutral, float weight)
+{
+    setMsfsDebug(mix(neutral, value, weight));
+}
+
 vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha)
 {
 #ifdef MSFS_BLEND_MASK
@@ -179,7 +196,7 @@ vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha
 #ifdef MSFS_DETAIL_COLOR_MAP
     blendColor = sRGBToLinear(texture(u_MsfsDetailColorSampler, getMsfsDetailUV(u_MsfsDetailColorUVSet)));
 #if DEBUG == DEBUG_MSFS_DETAIL_COLOR
-    setMsfsDebug(linearTosRGB(blendColor.rgb));
+    setMsfsDetailDebug(linearTosRGB(blendColor.rgb), vec3(0.5), getMsfsDetailWeight(vertexAlpha));
 #endif
 #endif
     float blend = getMsfsBlend(vertexAlpha);
@@ -193,7 +210,7 @@ vec4 applyMsfsDetailColor(vec4 albedo, float baseTextureAlpha, float vertexAlpha
     vec4 detail = texture(u_MsfsDetailColorSampler, getMsfsDetailUV(u_MsfsDetailColorUVSet));
     float mask = detail.a * vertexAlpha * baseTextureAlpha;
 #if DEBUG == DEBUG_MSFS_DETAIL_COLOR
-    setMsfsDebug(detail.rgb);
+    setMsfsDetailDebug(detail.rgb, vec3(0.5), mask);
 #endif
 #if DEBUG == DEBUG_MSFS_DETAIL_MASK
     setMsfsDebug(vec3(mask));
@@ -223,17 +240,18 @@ vec3 applyMsfsDetailComp(vec3 orm)
 #endif
 }
 
-// Raw detail comp channels for the debug outputs.
+// Detail comp channels for the debug outputs (0.5 = no change where no detail applies).
 void captureMsfsDetailCompDebug()
 {
 #if DEBUG == DEBUG_MSFS_DETAIL_OCCLUSION || DEBUG == DEBUG_MSFS_DETAIL_ROUGHNESS || DEBUG == DEBUG_MSFS_DETAIL_METALLIC
     vec3 comp = texture(u_MsfsDetailCompSampler, getMsfsDetailUV(u_MsfsDetailCompUVSet)).rgb;
+    float weight = getMsfsDetailWeight(getVertexColor().a);
 #if DEBUG == DEBUG_MSFS_DETAIL_OCCLUSION
-    setMsfsDebug(vec3(comp.r));
+    setMsfsDetailDebug(vec3(comp.r), vec3(0.5), weight);
 #elif DEBUG == DEBUG_MSFS_DETAIL_ROUGHNESS
-    setMsfsDebug(vec3(comp.g));
+    setMsfsDetailDebug(vec3(comp.g), vec3(0.5), weight);
 #else
-    setMsfsDebug(vec3(comp.b));
+    setMsfsDetailDebug(vec3(comp.b), vec3(0.5), weight);
 #endif
 #endif
 }
@@ -254,11 +272,11 @@ vec3 applyMsfsDetailNormal(vec3 n)
     detail.y = -detail.y;
 #endif
     detail *= u_MsfsDetailNormalScale;
-#if DEBUG == DEBUG_MSFS_DETAIL_NORMAL
-    setMsfsDebug(vec3(detail * 0.5 + 0.5, 1.0));
-#endif
 #endif
     float vertexAlpha = getVertexColor().a;
+#if DEBUG == DEBUG_MSFS_DETAIL_NORMAL && defined(MSFS_DETAIL_NORMAL_MAP)
+    setMsfsDetailDebug(vec3(detail * 0.5 + 0.5, 1.0), vec3(0.5, 0.5, 1.0), getMsfsDetailWeight(vertexAlpha));
+#endif
 #ifdef MSFS_BLEND_MASK
     n.xy = mix(n.xy, detail, 1.0 - getMsfsBlend(vertexAlpha));
 #else
@@ -496,11 +514,13 @@ NormalInfo getNormalInfo(vec3 v)
     info.ntex.z = sqrt(max(0.0, 1.0 - dot(info.ntex.xy, info.ntex.xy)));
 #endif
 #endif
-#ifdef MSFS_DETAIL_AFFECTS_NORMAL
-    info.ntex = applyMsfsDetailNormal(info.ntex);
-#endif
 #ifdef HAS_NORMAL_MAP
     info.ntex *= vec3(u_NormalScale, u_NormalScale, 1.0);
+#endif
+#ifdef MSFS_DETAIL_AFFECTS_NORMAL
+    // after the main normal's scale: the detail normal has its own (main xy * scale + detail xy
+    // * detail scale * weight, z rebuilt, like the sim's shader)
+    info.ntex = applyMsfsDetailNormal(info.ntex);
 #endif
     info.ntex = normalize(info.ntex);
     info.n = normalize(mat3(t, b, ng) * info.ntex);
