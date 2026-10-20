@@ -2169,7 +2169,6 @@ class gltfRenderer {
             shader.lastNode = undefined;
             this.shader.updateUniform("u_ViewProjectionMatrix", viewProjectionMatrix);
             this.shader.updateUniform("u_Exposure", state.renderingParameters.exposure, false);
-            this.shader.updateUniform("u_EmissiveMultiplier", state.renderingParameters.emissiveMultiplier ?? 1, false);
             this.shader.updateUniform("u_Camera", this.currentCameraPosition, false);
             if (!renderpassConfiguration.picking)
             {
@@ -2219,6 +2218,12 @@ class gltfRenderer {
                 highlighted
                     ? vec4.fromValues(...params.highlightColor, params.highlightStrength)
                     : NoHighlightColor,
+                false
+            );
+            // global emissive multiplier times the node's own scale (e.g. MSFS behavior emissive codes)
+            this.shader.updateUniform(
+                "u_EmissiveMultiplier",
+                (params.emissiveMultiplier ?? 1) * (state.nodeEmissiveScales.get(node.gltfObjectIndex) ?? 1),
                 false
             );
         }

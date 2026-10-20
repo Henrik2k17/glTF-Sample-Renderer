@@ -69,6 +69,9 @@ class GltfState {
         /** Indices of materials whose primitives are drawn with the highlight tint, e.g. in a material debugger */
         this.highlightedMaterialIndices = new Set();
 
+        /** Node index -> factor the emissive of the node's primitives is multiplied with (1 when not set) */
+        this.nodeEmissiveScales = new Map();
+
         /**
          * When set, only the primitives of these nodes can be picked (selection and hover),
          * also MSFS invisible ones (ASOBO_material_invisible) that are not drawn, e.g. the mouse
