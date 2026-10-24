@@ -7,6 +7,8 @@ import { FrameProfiler } from "../Renderer/frame_profiler.js";
 import { gltfMaterial } from "../gltf/material.js";
 import { addAnimatedMsfsMaterialExtensions } from "../gltf/msfs_material.js";
 import { gltfLoader } from "../ResourceLoader/loader.js";
+import { exportGlb } from "../Renderer/gltf_exporter.js";
+import { getMsfsEmissiveMultiplier } from "../gltf/msfs.js";
 
 /**
  * GltfView represents a view on a gltf, e.g. in a canvas
@@ -73,6 +75,37 @@ class GltfView {
         }
         this.textureReader ??= new TextureReader(this.renderer.webGl);
         return this.textureReader.read(state.gltf, textureIndex, maxSize);
+    }
+
+    /**
+     * Writes what the state shows of its glTF as a standard GLB, e.g. for Blender (see
+     * Renderer/gltf_exporter.js): the visible nodes of the current scene, without hidden
+     * materials, in the pose shown, with node animations and skins. Textures become PNG.
+     * @param {GltfState} state
+     * @param {object} [options]
+     * @param {number} [options.maxTextureSize] Largest texture side (0: as loaded).
+     * @param {({done, total}) => void} [options.onProgress] Called per written texture.
+     * @returns {Promise<{blob: Blob, warnings: string[]}>}
+     */
+    async exportGlb(state, { maxTextureSize = 0, onProgress = undefined } = {}) {
+        const gltf = state.gltf;
+        const sceneIndex = state.sceneIndex ?? 0;
+        const params = state.renderingParameters;
+        const shownNodes = new Set(
+            gltf.scenes[sceneIndex].gatherNodes(gltf, params.enabledExtensions).nodes
+        );
+        this.textureReader ??= new TextureReader(this.renderer.webGl);
+        return await exportGlb(gltf, {
+            sceneIndex,
+            shownNodes,
+            isPrimitiveShown: (primitive) => !this.renderer.isHiddenPrimitive(state, primitive),
+            readTexture: (textureIndex, maxSize, normalMap) =>
+                this.textureReader.read(gltf, textureIndex, maxSize, normalMap),
+            maxTextureSize,
+            // ASOBO_material_emissive day / night multiplier, as shown
+            emissiveStrength: (material) => getMsfsEmissiveMultiplier(material, params),
+            onProgress
+        });
     }
 
     /**

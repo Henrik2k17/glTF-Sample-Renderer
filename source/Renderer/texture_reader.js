@@ -15,10 +15,24 @@ uniform vec2 u_Size;
 uniform bool u_EncodeSRGB;
 uniform bool u_Signed;
 uniform bool u_TwoChannel;
+// 0: as stored; 1, 2: as an OpenGL (glTF) normal map, from an OpenGL (1) or DirectX (2) one
+uniform int u_NormalMap;
 out vec4 color;
 void main() {
     // Row 0 of the read back pixels is v = 0, the first row of the image.
     vec4 texel = texture(u_Texture, gl_FragCoord.xy / u_Size);
+    if (u_NormalMap != 0) {
+        // decoded like material_info.glsl does: signed maps store sign(v) * sqrt(|v|)
+        vec3 n = u_Signed ? vec3(sign(texel.xy) * texel.xy * texel.xy, texel.z) : texel.rgb * 2.0 - 1.0;
+        if (u_NormalMap == 2) {
+            n.y = -n.y;
+        }
+        if (u_TwoChannel) {
+            n.z = sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        }
+        color = vec4(clamp(n * 0.5 + 0.5, 0.0, 1.0), 1.0);
+        return;
+    }
     if (u_Signed) {
         // signed formats (BC4/BC5 SNORM) sample as -1..1; show them as stored in unsigned maps
         texel.rgb = texel.rgb * 0.5 + 0.5;
@@ -69,7 +83,8 @@ class TextureReader {
             size: gl.getUniformLocation(program, "u_Size"),
             encodeSRGB: gl.getUniformLocation(program, "u_EncodeSRGB"),
             signed: gl.getUniformLocation(program, "u_Signed"),
-            twoChannel: gl.getUniformLocation(program, "u_TwoChannel")
+            twoChannel: gl.getUniformLocation(program, "u_TwoChannel"),
+            normalMap: gl.getUniformLocation(program, "u_NormalMap")
         };
         this.vertexArray = gl.createVertexArray();
     }
@@ -78,10 +93,12 @@ class TextureReader {
      * @param {*} gltf The glTF the texture belongs to.
      * @param {number} textureIndex Index into gltf.textures.
      * @param {number} maxSize The longer side of the result is at most this many pixels.
+     * @param {"directx" | "opengl"} [normalMap] Read the texture as a normal map of this
+     *   convention and return it as a full (three channel) OpenGL normal map, as glTF stores them.
      * @returns {{width, height, pixels: Uint8ClampedArray, sourceWidth, sourceHeight} | undefined}
      *   undefined if the texture's image is not loaded.
      */
-    read(gltf, textureIndex, maxSize) {
+    read(gltf, textureIndex, maxSize, normalMap = undefined) {
         const texture = gltf.textures[textureIndex];
         const image = gltf.images[texture?.source];
         if (texture === undefined || image?.image === undefined || texture.type !== GL.TEXTURE_2D) {
@@ -133,6 +150,7 @@ class TextureReader {
                 const format = image.image.compressed?.format ?? "";
                 gl.uniform1i(this.locations.signed, format.endsWith("_SNORM") ? 1 : 0);
                 gl.uniform1i(this.locations.twoChannel, format.startsWith("BC5") ? 1 : 0);
+                gl.uniform1i(this.locations.normalMap, { opengl: 1, directx: 2 }[normalMap] ?? 0);
                 gl.bindVertexArray(this.vertexArray);
                 gl.disable(gl.BLEND);
                 gl.disable(gl.DEPTH_TEST);
