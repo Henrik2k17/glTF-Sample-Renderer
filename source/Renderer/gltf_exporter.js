@@ -505,6 +505,38 @@ class GlbExporter {
                 this.json.animations.push({ name: animation.name, channels, samplers });
             }
         }
+        this.addCombinedAnimation();
+    }
+
+    /**
+     * Puts an animation with the channels of all others first. Blender's importer makes only
+     * the first glTF animation the objects' active action; the others become NLA tracks that
+     * don't play, so MSFS models (one animation per part) would barely move on the timeline.
+     * A target animated by several animations keeps the first one's channel. The keyframe
+     * accessors are shared, so this costs only JSON.
+     */
+    addCombinedAnimation() {
+        const animations = this.json.animations;
+        if (animations.length < 2) {
+            return;
+        }
+        const combined = { name: "All animations", channels: [], samplers: [] };
+        const targets = new Set();
+        for (const animation of animations) {
+            for (const channel of animation.channels) {
+                const target = `${channel.target.node}/${channel.target.path}`;
+                if (targets.has(target)) {
+                    continue;
+                }
+                targets.add(target);
+                combined.samplers.push(animation.samplers[channel.sampler]);
+                combined.channels.push({
+                    sampler: combined.samplers.length - 1,
+                    target: channel.target
+                });
+            }
+        }
+        animations.unshift(combined);
     }
 
     writeMaterial(materialIndex) {
