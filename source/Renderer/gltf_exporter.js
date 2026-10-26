@@ -231,6 +231,7 @@ class GlbExporter {
      * @param {(textureIndex, maxSize, normalMap) => {width, height, pixels} | undefined} options.readTexture
      * @param {number} [options.maxTextureSize] Largest exported texture side (0: as loaded).
      * @param {(material) => number} [options.emissiveStrength] Extra emissive factor per material.
+     * @param {(animationIndex) => object} [options.animationExtras] Extras of an exported animation.
      * @param {({done, total}) => void} [options.onProgress] Called per written texture.
      */
     constructor(gltf, options) {
@@ -474,7 +475,7 @@ class GlbExporter {
 
     writeAnimations(nodeMap) {
         const gltf = this.gltf;
-        for (const animation of gltf.animations) {
+        gltf.animations.forEach((animation, animationIndex) => {
             const samplers = [];
             const samplerMap = new Map();
             const channels = [];
@@ -502,9 +503,10 @@ class GlbExporter {
                 });
             }
             if (channels.length > 0) {
-                this.json.animations.push({ name: animation.name, channels, samplers });
+                const extras = this.options.animationExtras?.(animationIndex);
+                this.json.animations.push({ name: animation.name, channels, samplers, extras });
             }
-        }
+        });
         this.addCombinedAnimation();
     }
 

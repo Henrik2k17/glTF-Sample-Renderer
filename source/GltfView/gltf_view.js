@@ -85,9 +85,13 @@ class GltfView {
      * @param {object} [options]
      * @param {number} [options.maxTextureSize] Largest texture side (0: as loaded).
      * @param {({done, total}) => void} [options.onProgress] Called per written texture.
+     * @param {(animationIndex) => object} [options.animationExtras] Extras of an exported animation.
      * @returns {Promise<{blob: Blob, warnings: string[]}>}
      */
-    async exportGlb(state, { maxTextureSize = 0, onProgress = undefined } = {}) {
+    async exportGlb(
+        state,
+        { maxTextureSize = 0, onProgress = undefined, animationExtras = undefined } = {}
+    ) {
         const gltf = state.gltf;
         const sceneIndex = state.sceneIndex ?? 0;
         const params = state.renderingParameters;
@@ -104,7 +108,8 @@ class GltfView {
             maxTextureSize,
             // ASOBO_material_emissive day / night multiplier, as shown
             emissiveStrength: (material) => getMsfsEmissiveMultiplier(material, params),
-            onProgress
+            onProgress,
+            animationExtras
         });
     }
 
